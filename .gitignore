@@ -7,14 +7,18 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies
 node_modules
 dist
 dist-ssr
+dist-electron
 *.local
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
 .idea
 .DS_Store
 *.suo
@@ -22,3 +26,17 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment
+.env
+.env.production
+.env.development
+.env.local
+
+# Build artifacts
+tsconfig.tsbuildinfo
+build
+
+# OS files
+Thumbs.db
+Desktop.ini
