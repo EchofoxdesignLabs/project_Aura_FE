@@ -35,6 +35,31 @@ export interface JwtPayload {
   companyId: string;
 }
 
+// ─── Invites ───
+export interface CreateInviteRequest {
+  email: string;
+  roleName: 'EMPLOYEE' | 'ORG_ADMIN'; // from backend payload field
+}
+
+export interface CreateInviteResponse {
+  inviteToken: string;
+  inviteUrl: string;
+  expiresAt: string;
+}
+
+export interface InviteDetails {
+  companyName: string;
+  role: 'EMPLOYEE' | 'ORG_ADMIN';
+  email: string;
+  inviterName: string;
+}
+
+export interface AcceptInviteRequest {
+  name: string;
+  password: string;
+}
+
+
 export interface Office {
   id: string;
   name: string;

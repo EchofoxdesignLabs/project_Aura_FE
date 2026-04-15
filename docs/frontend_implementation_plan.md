@@ -25,6 +25,9 @@ The backend (Phases 1–5) is **fully complete**: Auth (register-company, login,
 | `GET /office` | GET | JWT | `Office[]` (id, name, width, height) |
 | `GET /office/:id` | GET | JWT | `Office` with `zones[]` |
 | `POST /office/seed` | POST | JWT | `Office` with `zones[]` (creates default layout) |
+| `POST /auth/invites` | POST | JWT (Admin) | `{ inviteToken, inviteUrl, expiresAt }` |
+| `GET /auth/invites/:token` | GET | None | `{ companyName, role, email, inviterName }` |
+| `POST /auth/invites/:token/accept` | POST | None | `{ access_token, user: { id, name, role, company } }` |
 
 **Backend WebSocket Events (already working on port 3001):**
 
@@ -1070,9 +1073,230 @@ html, body, #root {
 
 ---
 
+### Phase 13 — Employee Invite Flow
+
+Gives admins a first-class way to bring teammates into the same company workspace without any manual database work. The full journey is: admin generates an invite link → invited user opens the link → sets up their account → lands straight on the office selection screen.
+
+> [!IMPORTANT]
+> **Role guard**: Every invite-related UI element is gated on `authStore.user.role === 'ORG_ADMIN'`. Employees never see the Invite button and cannot reach the generation modal.
+
+> [!NOTE]
+> **No email sending in POC**: The backend creates the invite token and returns the link. Actual email delivery is deferred. The admin copies the link manually and shares it (Slack, WhatsApp, etc.).
+
+---
+
+#### Step 13.1 — Invite Button & InviteModal
+
+##### [MODIFY] [OfficeSelectScreen.tsx](file:///d:/Echofox/project-aura-fe/src/modules/office/ui/screens/OfficeSelectScreen.tsx)
+
+Add a conditional **Invite Member** button in the top-right of the header bar, shown only when `user.role === 'ORG_ADMIN'`. Clicking it opens the `InviteModal`.
+
+```typescript
+{user?.role === 'ORG_ADMIN' && (
+  <Button variant="outline" onClick={() => setInviteOpen(true)}>
+    + Invite Member
+  </Button>
+)}
+<InviteModal open={inviteOpen} onClose={() => setInviteOpen(false)} />
+```
+
+---
+
+##### [NEW] [InviteModal.tsx](file:///d:/Echofox/project-aura-fe/src/modules/office/ui/components/InviteModal.tsx)
+
+A glassmorphism modal/drawer with the invite form.
+
+**Visual design:**
+- Same dark glass card style as the rest of the app
+- Form fields: `email` (required), `role` select (`EMPLOYEE` | `ORG_ADMIN`), optional `message` textarea
+- Submit button: gradient primary, loading spinner while API call is in flight
+- After success: form is replaced by a read-only invite link box + **Copy Link** button + expiry note
+
+**State (local — no global store needed):**
+```typescript
+const [email, setEmail]     = useState('');
+const [role, setRole]       = useState<'EMPLOYEE' | 'ORG_ADMIN'>('EMPLOYEE');
+const [message, setMessage] = useState('');
+const [isLoading, setIsLoading] = useState(false);
+const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+const [error, setError]     = useState<string | null>(null);
+```
+
+**Submit handler:**
+```typescript
+async function handleSubmit() {
+  setIsLoading(true);
+  setError(null);
+  try {
+    const res = await apiClient.post<{ inviteToken: string; inviteUrl: string; expiresAt: string }>(
+      '/auth/invites',
+      { email, role, message }
+    );
+    setInviteUrl(res.inviteUrl);
+  } catch (e) {
+    setError((e as ApiError).message);
+  } finally {
+    setIsLoading(false);
+  }
+}
+```
+
+**Copy button:**
+```typescript
+navigator.clipboard.writeText(inviteUrl);
+// Show a brief "Copied!" tooltip for 2 seconds
+```
+
+---
+
+#### Step 13.2 — Public Invite Acceptance Screen
+
+##### [NEW] [InviteAcceptScreen.tsx](file:///d:/Echofox/project-aura-fe/src/app/screens/InviteAcceptScreen.tsx)
+
+A **public** screen — no authentication required. Accessed via `/invite/:token`.
+
+**Lifecycle:**
+
+1. **On mount** — read token from URL (`window.location.pathname.split('/invite/')[1]`), call `GET /auth/invites/:token`
+   - On success: show company name, role, inviter name → "You've been invited to join **Acme Corp** as **Employee** by **Alice**"
+   - On failure (404 / expired): show a full-screen error card — "This invite link is invalid or has expired."
+
+2. **Account setup form** (gated, only shown on valid token):
+   - `name` (full name, required)
+   - `password` (required, min 8 chars)
+   - `confirmPassword` (client-side match check)
+   - Submit: `POST /auth/invites/:token/accept { name, password }`
+
+3. **Post-accept:**
+   - Store `access_token` and `user` in `authStore` (auto-login — same path as a normal login)
+   - Update `apiClient.setToken(token)` 
+   - Redirect to OfficeSelectScreen by setting `isAuthenticated = true` in the store (App.tsx handles the rest)
+
+**Visual design (matches overall dark theme):**
+- Full-screen gradient background identical to LoginScreen
+- Central glass card, max-width 480px
+- Top section: company logo placeholder (first letter of company name in a large gradient circle) + welcome text
+- Role badge: pill with role name (`Employee`, `Admin`) using accent colour
+- Bottom: account setup form
+- Submit button: "Join [Company Name] →"
+
+**Error state:**
+- Different glass card with a warning icon
+- Text: "This invite link is invalid or has expired."
+- CTA: "Back to Login →"
+
+---
+
+#### Step 13.3 — App Router Update
+
+##### [MODIFY] [App.tsx](file:///d:/Echofox/project-aura-fe/src/App.tsx)
+
+Extend the existing state-based router to detect an invite URL before checking `isAuthenticated`:
+
+```typescript
+function App() {
+  const { isAuthenticated, hydrate } = useAuthStore();
+  const currentOfficeId = useGameStore(s => s.currentOfficeId);
+
+  useEffect(() => { hydrate(); }, []);
+
+  // Check for invite deep-link FIRST — must be public (no auth required)
+  const path = window.location.pathname;
+  if (path.startsWith('/invite/')) return <InviteAcceptScreen />;
+
+  if (!isAuthenticated) return <LoginScreen />;
+  if (!currentOfficeId) return <OfficeSelectScreen />;
+  return <GameContainer />;
+}
+```
+
+> [!NOTE]
+> This keeps zero external router dependencies. The invite route check is a simple string match — the token is parsed inside `InviteAcceptScreen` itself.
+
+---
+
+#### Step 13.4 — Auth Store Extensions
+
+##### [MODIFY] [auth.store.ts](file:///d:/Echofox/project-aura-fe/src/core/store/auth.store.ts)
+
+Extend the existing `AuthState` interface and store with invite-related actions:
+
+```typescript
+// ─── New state additions ───
+inviteLoading: boolean;
+inviteError: string | null;
+
+// ─── New actions ───
+createInvite: (email: string, role: string, message?: string) =>
+  Promise<{ inviteToken: string; inviteUrl: string; expiresAt: string }>;
+
+acceptInvite: (token: string, name: string, password: string) => Promise<void>;
+```
+
+**`createInvite()` implementation:**
+- Calls `apiClient.post('/auth/invites', { email, role, message })`
+- Returns the full response object to the caller (InviteModal manages its own display state)
+- Sets `inviteLoading` / `inviteError` for optional global error display
+
+**`acceptInvite()` implementation:**
+- Calls `apiClient.post('/auth/invites/:token/accept', { name, password })`
+- On success: stores `access_token` + `user` in `localStorage`, calls `apiClient.setToken()`, sets `token`, `user`, `isAuthenticated: true` in the store
+- This is identical to what `login()` does after a successful API call — the user is fully logged in after accepting
+
+> [!TIP]
+> **Simpler alternative**: If you want to keep `auth.store.ts` focused on auth-only state, both invite actions can live as inline `async` functions inside the respective components (`InviteModal` and `InviteAcceptScreen`), using `apiClient` directly. The invite flow has no shared global state requirements. The store additions are optional organisation.
+
+---
+
+#### Step 13.5 — Invite Type Contracts
+
+##### [MODIFY] [types.ts](file:///d:/Echofox/project-aura-fe/src/core/types.ts)
+
+Add invite-specific types alongside the existing auth types:
+
+```typescript
+// ─── Invites ───
+export interface CreateInviteRequest {
+  email: string;
+  role: 'EMPLOYEE' | 'ORG_ADMIN';
+  message?: string;
+}
+export interface CreateInviteResponse {
+  inviteToken: string;
+  inviteUrl: string;
+  expiresAt: string; // ISO date string
+}
+export interface InviteDetails {
+  companyName: string;
+  role: 'EMPLOYEE' | 'ORG_ADMIN';
+  email: string;
+  inviterName: string;
+}
+export interface AcceptInviteRequest {
+  name: string;
+  password: string;
+}
+// AcceptInviteResponse reuses LoginResponse shape: { access_token, user: AuthUser }
+```
+
+---
+
+#### Frontend Acceptance Criteria
+
+| # | Criterion | How to verify |
+|---|---|---|
+| ✅ | Admin can generate an invite from the UI | Test #11, #12 in manual test scenarios |
+| ✅ | Invite button is hidden for non-admin users | Test #17 |
+| ✅ | User can open the invite link and complete account setup | Test #13, #14 |
+| ✅ | After accept, the user belongs to the same company | Test #15 — both see same offices |
+| ✅ | Invalid/expired tokens show a clear error screen | Test #16 |
+| ✅ | After accept, user is auto-logged in (no separate login step) | Test #14 — lands on OfficeSelectScreen |
+
+---
+
 ## Complete File Manifest
 
-### New Files (21 files)
+### New Files (26 files)
 
 | # | Path | Phase | Description |
 |---|---|---|---|
@@ -1098,13 +1322,17 @@ html, body, #root {
 | 20 | `src/modules/spatial/ui/MeetingOverlay.tsx` | 11.1 | Zoom-like meeting UI |
 | 21 | `src/modules/spatial/ui/VideoTile.tsx` | 11.2 | Reusable video component |
 | 22 | `src/modules/spatial/ui/ProximityIndicator.tsx` | 11.3 | Floating video bubbles |
+| 23 | `src/modules/office/ui/components/InviteModal.tsx` | 13.1 | Admin invite modal/drawer |
+| 24 | `src/app/screens/InviteAcceptScreen.tsx` | 13.2 | Public invite acceptance page |
 
-### Modified Files (2 files)
+### Modified Files (4 files)
 
 | # | Path | Phase | Change |
 |---|---|---|---|
-| 1 | `src/App.tsx` | 7.3 | State-based routing |
+| 1 | `src/App.tsx` | 7.3 / 13.3 | State-based routing + `/invite/:token` route |
 | 2 | `src/index.css` | 12.2 | Animations, fonts, glass utilities |
+| 3 | `src/core/store/auth.store.ts` | 13.4 | Add `createInvite()` + `acceptInvite()` actions |
+| 4 | `src/modules/office/ui/screens/OfficeSelectScreen.tsx` | 13.1 | Add "Invite Member" button for admins |
 
 ### New Dependencies (1 package)
 
@@ -1123,6 +1351,8 @@ graph TB
         subgraph React ["React Layer"]
             LoginScreen["LoginScreen"]
             OfficeSelect["OfficeSelectScreen"]
+            InviteModal["InviteModal (Admin only)"]
+            InviteAccept["InviteAcceptScreen (/invite/:token)"]
             HUD["HUD (Zone Badge, Minimap)"]
             MediaToolbar["MediaToolbar"]
             MeetingOverlay["MeetingOverlay"]
@@ -1137,7 +1367,7 @@ graph TB
         end
 
         subgraph Bridge ["Zustand Stores (The Bridge)"]
-            AuthStore["authStore"]
+            AuthStore["authStore\n(login, logout, hydrate,\ncreateInvite, acceptInvite)"]
             GameStore["gameStore"]
             MediaStore["mediaStore"]
         end
@@ -1154,6 +1384,8 @@ graph TB
             MeetingSys["MeetingSystem"]
         end
 
+        InviteModal --> AuthStore
+        InviteAccept --> ApiClient
         React <--> Bridge
         Phaser <--> Bridge
         NetworkMgr --> Bridge
@@ -1237,6 +1469,25 @@ sequenceDiagram
     FE->>RT: player:move (outside zone bounds)
     RT-->>FE: zone:left + meeting:peer-left
     FE->>FE: Teardown meeting, resume ProximitySystem
+
+    Note over U,API: Phase 13 — Admin Invites a Teammate
+    U->>FE: Click "Invite Member" (admin only)
+    FE->>FE: Open InviteModal (email, role, optional message)
+    U->>FE: Fill form and click "Send Invite"
+    FE->>API: POST /auth/invites { email, role, message }
+    API-->>FE: { inviteToken, inviteUrl, expiresAt }
+    FE->>FE: Show invite link + Copy button in modal
+
+    Note over U,API: Phase 13 — Invited User Accepts
+    U->>FE: Opens /invite/:token in browser
+    FE->>API: GET /auth/invites/:token
+    API-->>FE: { companyName, role, email, inviterName }
+    FE->>FE: Show invite details (company, role, inviter)
+    U->>FE: Enter name + password, click "Join"
+    FE->>API: POST /auth/invites/:token/accept { name, password }
+    API-->>FE: { access_token, user }
+    FE->>FE: Store token in authStore (auto-login)
+    FE->>FE: Navigate to OfficeSelectScreen
 ```
 
 ---
@@ -1270,6 +1521,11 @@ sequenceDiagram
 | 23 | 11.3 | `ProximityIndicator.tsx` | media.store, VideoTile |
 | 24 | 11.1 | `MeetingOverlay.tsx` | game.store, media.store, VideoTile |
 | 25 | 8.1 | `GameContainer.tsx` | OfficeScene, HUD, MeetingOverlay, ProximityIndicator, media.store, webrtc.manager |
+| 26 | 13.4 | `auth.store.ts` (modify) | api.client, types |
+| 27 | 13.1 | `InviteModal.tsx` | auth.store, api.client |
+| 28 | 13.1 | `OfficeSelectScreen.tsx` (modify) | InviteModal, auth.store |
+| 29 | 13.2 | `InviteAcceptScreen.tsx` | api.client, auth.store |
+| 30 | 13.3 | `App.tsx` (modify) | InviteAcceptScreen, auth.store |
 
 ---
 
@@ -1310,6 +1566,13 @@ npx nest start aura-realtime --watch  # Port 3001
 | 8 | **Meeting Entry** | Both walk into Conference Room | MeetingOverlay appears, video grid shows |
 | 9 | **Meeting Exit** | One clicks "Leave Meeting" | Overlay hides, proximity resumes |
 | 10 | **Disconnect** | Close one tab | Other tab sees avatar disappear, media cleans up |
+| 11 | **Invite Button Visibility** | Login as `ORG_ADMIN`, open OfficeSelectScreen | "Invite Member" button visible only to admin |
+| 12 | **Generate Invite** | Admin fills email + role, clicks send | Modal shows generated invite link + copy button |
+| 13 | **Invite Link** | Copy link, open in incognito | InviteAcceptScreen renders company name + role |
+| 14 | **Accept Invite** | Fill name + password, click "Join" | Account created, auto-logged in, redirected to OfficeSelectScreen |
+| 15 | **Both See Same Offices** | Admin & invited user both logged in | Identical office list visible to both |
+| 16 | **Invalid Token** | Navigate to `/invite/bad-token` | Error screen: "This invite link is invalid or expired" |
+| 17 | **EMPLOYEE Role Check** | Login as `EMPLOYEE` | "Invite Member" button NOT visible |
 
 ### Debug Tools
 
