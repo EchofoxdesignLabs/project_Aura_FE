@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import Phaser from 'phaser';
 import { useGameStore } from '@core/store/game.store';
 import { OfficeScene } from '../scenes/OfficeScene';
+import { HUD } from './HUD';
 
 export function GameContainer() {
   const gameContainerRef = useRef<HTMLDivElement>(null);
@@ -45,7 +46,6 @@ export function GameContainer() {
     };
     window.addEventListener('resize', handleResize);
 
-    // Lifecycle Cleanup
     return () => {
       console.log('[GameContainer] Destroying Phaser instance...');
       window.removeEventListener('resize', handleResize);
@@ -54,25 +54,20 @@ export function GameContainer() {
         gameRef.current.destroy(true);
         gameRef.current = null;
       }
-      
-      // IMPORTANT: Do NOT disconnect the socket or reset the store here!
-      // React Strict Mode triggers this on mount. Tearing down global singletons
-      // here causes race conditions. Disconnecting will be handled by a UI button later.
     };
   }, [currentOfficeId]);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-slate-950">
+      {/* z-0: Phaser World Layer */}
       <div ref={gameContainerRef} className="absolute inset-0 z-0" />
 
-      {isEngineReady && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex flex-col justify-between p-6">
-           {/* Future HUD components go here */}
-        </div>
-      )}
+      {/* z-10: HUD Overlay Layer */}
+      {isEngineReady && <HUD />}
       
+      {/* z-20: Boot Sequence Layer */}
       {!isEngineReady && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm text-white">
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/80 text-white backdrop-blur-sm">
           <div className="flex flex-col items-center gap-4 text-slate-400">
             <span className="inline-flex h-3 w-3 animate-pulse rounded-full bg-cyan-400" />
             <p>Booting spatial environment...</p>

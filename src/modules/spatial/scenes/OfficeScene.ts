@@ -70,6 +70,14 @@ export class OfficeScene extends Phaser.Scene {
     const body = localPlayer.body as Phaser.Physics.Arcade.Body;
     if (body) {
       body.setVelocity(velocity.vx, velocity.vy);
+      // Sync local position back to the store ONLY if moving.
+      // This is necessary so the React Minimap canvas can draw the local player in real-time.
+      if (velocity.vx !== 0 || velocity.vy !== 0) {
+        const state = useGameStore.getState();
+        if (state.localPlayerId) {
+          state.updatePlayerPosition(state.localPlayerId, localPlayer.x, localPlayer.y);
+        }
+      }
     }
 
     // Emit position
