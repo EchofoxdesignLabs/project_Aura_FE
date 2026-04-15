@@ -7,6 +7,7 @@ import type {
   LoginResponse,
   RegisterCompanyRequest,
   RegisterCompanyResponse,
+  CreateInviteResponse,
 } from '@core/types';
 import { socketService } from '@core/services/socket.service';
 import { useGameStore } from '@core/store/game.store';
@@ -26,8 +27,12 @@ export interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
+  inviteLoading: boolean;
+  inviteError: string | null;
   login: (email: string, password: string) => Promise<void>;
   registerCompany: (payload: RegisterCompanyRequest) => Promise<void>;
+  createInvite: (email: string, roleName: 'EMPLOYEE' | 'ORG_ADMIN') => Promise<CreateInviteResponse>;
+  acceptInvite: (token: string, name: string, password: string) => Promise<void>;
   logout: () => void;
   hydrate: () => void;
   clearError: () => void;
@@ -127,6 +132,8 @@ export const useAuthStore = create<AuthState>()((set) => ({
   isAuthenticated: false,
   isLoading: false,
   error: null,
+  inviteLoading: false,
+  inviteError: null,
   login: async (email, password) => {
     set({
       isLoading: true,
@@ -182,6 +189,30 @@ export const useAuthStore = create<AuthState>()((set) => ({
         error:
           'Workspace created successfully, but automatic sign-in failed. Please switch to Sign In and use your admin credentials.',
       });
+    }
+  },
+  createInvite: async (email, roleName) => {
+    set({ inviteLoading: true, inviteError: null });
+    try {
+      const response = await apiClient.post<CreateInviteResponse>('/auth/invites', { email, roleName });
+      set({ inviteLoading: false });
+      return response;
+    } catch (error) {
+      const msg = normalizeErrorMessage(error);
+      set({ inviteLoading: false, inviteError: msg });
+      throw new Error(msg);
+    }
+  },
+  acceptInvite: async (token, name, password) => {
+    set({ isLoading: true, error: null });
+    try {
+      const response = await apiClient.post<LoginResponse>(`/auth/invites/${token}/accept`, { name, password });
+      setAuthenticatedSession(set, response);
+    } catch (error) {
+      clearPersistedAuth();
+      apiClient.setToken(null);
+      resetAuthState(set);
+      set({ error: normalizeErrorMessage(error) });
     }
   },
   logout: () => {

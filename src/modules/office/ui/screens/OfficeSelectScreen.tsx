@@ -9,6 +9,7 @@ import { Card, CardContent } from '@core/ui/Card';
 import type { Office, OfficeStatePayload } from '@core/types';
 
 import { OfficeCard } from '../components/OfficeCard';
+import { InviteModal } from '../components/InviteModal';
 
 export function OfficeSelectScreen() {
   const user = useAuthStore((state) => state.user);
@@ -24,6 +25,7 @@ export function OfficeSelectScreen() {
   const [isSeeding, setIsSeeding] = useState(false);
   const [connectingOfficeId, setConnectingOfficeId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   const officeCountLabel = useMemo(
     () => `${offices.length.toString().padStart(2, '0')} office${offices.length === 1 ? '' : 's'}`,
@@ -174,12 +176,19 @@ export function OfficeSelectScreen() {
                   Refresh Offices
                 </Button>
               )}
+              {user?.role === 'ORG_ADMIN' ? (
+                <Button variant="outline" onClick={() => setInviteOpen(true)}>
+                  + Invite Member
+                </Button>
+              ) : null}
               <Button onClick={logout} variant="ghost" className="text-slate-300">
                 Sign Out
               </Button>
             </div>
           </div>
         </header>
+
+        <InviteModal open={inviteOpen} onClose={() => setInviteOpen(false)} />
 
         {error ? (
           <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 px-5 py-4 text-sm text-rose-100">
