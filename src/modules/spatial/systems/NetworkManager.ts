@@ -1,5 +1,6 @@
 import { socketService } from '@core/services/socket.service';
 import { useGameStore } from '@core/store/game.store';
+import { webRTCManager } from '@core/services/webrtc.manager';
 
 export class NetworkManager {
   private lastEmitTime = 0;
@@ -33,7 +34,14 @@ export class NetworkManager {
     });
 
     socketService.on('zone:left', () => {
-      useGameStore.getState().setCurrentZone(null);
+      const state = useGameStore.getState();
+      // The backend does not emit a dedicated meeting:leave event to the leaving client.
+      // It only sends zone:left + meeting:peer-left to other participants.
+      // So we must detect and exit meeting mode here.
+      if (state.inMeeting) {
+        state.leaveMeeting();
+      }
+      state.setCurrentZone(null);
     });
 
     // Meeting Events
@@ -48,6 +56,19 @@ export class NetworkManager {
     socketService.on('meeting:peer-left', ({ userId }) => {
       useGameStore.getState().removeMeetingParticipant(userId);
     });
+
+    // Phase 10: WebRTC Signaling Events
+    socketService.on('signal:offer', ({ fromUserId, offer }) => {
+      webRTCManager.handleOffer(fromUserId, offer);
+    });
+
+    socketService.on('signal:answer', ({ fromUserId, answer }) => {
+      webRTCManager.handleAnswer(fromUserId, answer);
+    });
+
+    socketService.on('signal:ice-candidate', ({ fromUserId, candidate }) => {
+      webRTCManager.handleIceCandidate(fromUserId, candidate);
+    });
   }
 
   public emitMove(x: number, y: number): void {
@@ -61,13 +82,23 @@ export class NetworkManager {
   }
 
   public destroy(): void {
+    // Player Events
     socketService.off('player:joined');
     socketService.off('player:left');
     socketService.off('player:moved');
+    
+    // Zone Events
     socketService.off('zone:entered');
     socketService.off('zone:left');
+    
+    // Meeting Events
     socketService.off('meeting:join');
     socketService.off('meeting:peer-joined');
     socketService.off('meeting:peer-left');
+    
+    // Phase 10: Cleanup Signaling Events
+    socketService.off('signal:offer');
+    socketService.off('signal:answer');
+    socketService.off('signal:ice-candidate');
   }
 }

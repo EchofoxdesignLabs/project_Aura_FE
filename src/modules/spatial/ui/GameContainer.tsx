@@ -1,21 +1,48 @@
 import { useEffect, useRef, useState } from 'react';
 import Phaser from 'phaser';
 import { useGameStore } from '@core/store/game.store';
+import { useMediaStore } from '@core/store/media.store';
+import { webRTCManager } from '@core/services/webrtc.manager';
 import { OfficeScene } from '../scenes/OfficeScene';
 import { HUD } from './HUD';
+import { proximitySystem } from '../systems/ProximitySystem';
+import { meetingSystem } from '../systems/MeetingSystem';
 
 export function GameContainer() {
   const gameContainerRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
   
   const currentOfficeId = useGameStore((state) => state.currentOfficeId);
+  const initMedia = useMediaStore((state) => state.initMedia);
+  const stopMedia = useMediaStore((state) => state.stopMedia);
+  
   const [isEngineReady, setIsEngineReady] = useState(false);
 
   useEffect(() => {
     if (!gameContainerRef.current || !currentOfficeId) {
       return;
     }
+    // Initialize media FIRST, then start proximity/meeting systems.
+    // If proximity starts before getUserMedia resolves, peer connections
+    // are created without tracks → no audio/video is ever exchanged.
+    initMedia()
+      .then(() => {
+        const stream = useMediaStore.getState().localStream;
+        if (stream) {
+          webRTCManager.setLocalStream(stream);
+        }
+      })
+      .catch((error) => {
+        console.warn('[GameContainer] Media access denied or unavailable. Office will load without voice/video.', error);
+      })
+      .finally(() => {
+        // Start systems AFTER media resolves (or fails).
+        // This guarantees localStream is set before any peer connections are created.
+        meetingSystem.init();
+        proximitySystem.start();
+      });
 
+    // Boot the spatial engine
     if (!gameRef.current) {
       console.log('[GameContainer] Booting spatial engine...');
       const config: Phaser.Types.Core.GameConfig = {
@@ -50,12 +77,20 @@ export function GameContainer() {
       console.log('[GameContainer] Destroying Phaser instance...');
       window.removeEventListener('resize', handleResize);
       
+      // Step 2 Cleanup: Disconnect all peers and stop hardware tracks
+      // Add these two cleanup lines:
+      meetingSystem.destroy();
+      proximitySystem.stop();
+      webRTCManager.disconnectAll();
+      webRTCManager.setLocalStream(null);
+      stopMedia();
+      
       if (gameRef.current) {
         gameRef.current.destroy(true);
         gameRef.current = null;
       }
     };
-  }, [currentOfficeId]);
+  }, [currentOfficeId, initMedia, stopMedia]);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-slate-950">
