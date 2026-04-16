@@ -1,8 +1,11 @@
-import { Mic, MicOff, Video, VideoOff } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Monitor, MonitorOff } from 'lucide-react';
 import { useMediaStore } from '@core/store/media.store';
 
 export function MediaToolbar() {
-  const { isMicOn, isCameraOn, isMediaInitialized, toggleMic, toggleCamera } = useMediaStore();
+  const {
+    isMicOn, isCameraOn, isMediaInitialized, isScreenSharing,
+    toggleMic, toggleCamera, startScreenShare, stopScreenShare,
+  } = useMediaStore();
 
   return (
     <div className="pointer-events-auto flex items-center gap-4 rounded-full border border-white/10 bg-slate-900/80 px-6 py-3 shadow-lg backdrop-blur-md">
@@ -30,6 +33,20 @@ export function MediaToolbar() {
         title={isMediaInitialized ? 'Toggle Camera' : 'Media not initialized'}
       >
         {isCameraOn ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
+      </button>
+
+      {/* Screen share button */}
+      <button
+        onClick={isScreenSharing ? stopScreenShare : startScreenShare}
+        disabled={!isMediaInitialized}
+        className={`flex h-12 w-12 items-center justify-center rounded-full transition-colors ${
+          isScreenSharing
+            ? 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
+            : 'bg-slate-700 text-white hover:bg-slate-600'
+        } ${!isMediaInitialized ? 'cursor-not-allowed opacity-50' : ''}`}
+        title={isScreenSharing ? 'Stop Sharing' : 'Share Screen'}
+      >
+        {isScreenSharing ? <MonitorOff className="h-5 w-5" /> : <Monitor className="h-5 w-5" />}
       </button>
     </div>
   );

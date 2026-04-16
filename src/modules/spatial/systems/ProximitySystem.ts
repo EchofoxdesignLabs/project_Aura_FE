@@ -1,5 +1,5 @@
 import { useGameStore } from '@core/store/game.store';
-import { webRTCManager } from '@core/services/webrtc.manager';
+import { webRTCManager } from '@core/services/webrtc/webrtc.manager';
 
 const PROXIMITY_RADIUS = 300;
 const FULL_VOLUME_RADIUS = 50;

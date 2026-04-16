@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import Phaser from 'phaser';
 import { useGameStore } from '@core/store/game.store';
 import { useMediaStore } from '@core/store/media.store';
-import { webRTCManager } from '@core/services/webrtc.manager';
+import { webRTCManager } from '@core/services/webrtc/webrtc.manager';
 import { OfficeScene } from '../scenes/OfficeScene';
 import { HUD } from './HUD';
+import { ProximityIndicator } from './ProximityIndicator';
+import { MeetingOverlay } from './MeetingOverlay';
 import { proximitySystem } from '../systems/ProximitySystem';
 import { meetingSystem } from '../systems/MeetingSystem';
 
@@ -77,8 +79,7 @@ export function GameContainer() {
       console.log('[GameContainer] Destroying Phaser instance...');
       window.removeEventListener('resize', handleResize);
       
-      // Step 2 Cleanup: Disconnect all peers and stop hardware tracks
-      // Add these two cleanup lines:
+      // Cleanup: Disconnect all peers and stop hardware tracks
       meetingSystem.destroy();
       proximitySystem.stop();
       webRTCManager.disconnectAll();
@@ -92,15 +93,25 @@ export function GameContainer() {
     };
   }, [currentOfficeId, initMedia, stopMedia]);
 
+  // NOTE: Phaser keyboard input is NEVER disabled.
+  // Users must be able to walk freely inside meeting zones (like Gather).
+  // They leave the meeting by walking out of the zone.
+
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-slate-950">
       {/* z-0: Phaser World Layer */}
       <div ref={gameContainerRef} className="absolute inset-0 z-0" />
 
-      {/* z-10: HUD Overlay Layer */}
+      {/* z-10: HUD Overlay Layer (always visible) */}
       {isEngineReady && <HUD />}
+
+      {/* z-20: Proximity video bubbles (shown when NOT in meeting) */}
+      {isEngineReady && <ProximityIndicator />}
+
+      {/* z-20: Meeting video strip (shown when IN meeting) */}
+      {isEngineReady && <MeetingOverlay />}
       
-      {/* z-20: Boot Sequence Layer */}
+      {/* z-40: Boot Sequence Layer */}
       {!isEngineReady && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/80 text-white backdrop-blur-sm">
           <div className="flex flex-col items-center gap-4 text-slate-400">

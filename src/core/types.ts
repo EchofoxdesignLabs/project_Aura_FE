@@ -96,6 +96,7 @@ export interface PlayerState {
   y: number;
   currentZoneId: string | null;
   currentZoneType: string | null;
+  isScreenSharing?: boolean;
 }
 
 export interface OfficeJoinPayload {
@@ -171,9 +172,21 @@ export interface SignalAnswerPayload {
   answer: RTCSessionDescriptionInit;
 }
 
+export interface ScreenSharePayload {
+  userId: string;
+}
+
 export interface SignalIceCandidatePayload {
   fromUserId: string;
   candidate: RTCIceCandidateInit;
+}
+
+export interface MediaStatePayload {
+  userId: string;
+  state: {
+    isMicOn?: boolean;
+    isCameraOn?: boolean;
+  };
 }
 
 export interface SocketClientToServerEvents {
@@ -182,6 +195,9 @@ export interface SocketClientToServerEvents {
   'signal:offer': (payload: SignalOfferRequest) => void;
   'signal:answer': (payload: SignalAnswerRequest) => void;
   'signal:ice-candidate': (payload: SignalIceCandidateRequest) => void;
+  'screenshare:start': (payload: Record<string, never>) => void;
+  'screenshare:stop': (payload: Record<string, never>) => void;
+  'media:state': (payload: { isMicOn?: boolean; isCameraOn?: boolean }) => void;
 }
 
 export interface SocketServerToClientEvents {
@@ -199,4 +215,7 @@ export interface SocketServerToClientEvents {
   'signal:offer': (payload: SignalOfferPayload) => void;
   'signal:answer': (payload: SignalAnswerPayload) => void;
   'signal:ice-candidate': (payload: SignalIceCandidatePayload) => void;
+  'screenshare:start': (payload: ScreenSharePayload) => void;
+  'screenshare:stop': (payload: ScreenSharePayload) => void;
+  'media:state': (payload: MediaStatePayload) => void;
 }

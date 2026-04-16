@@ -1,6 +1,7 @@
 import { socketService } from '@core/services/socket.service';
 import { useGameStore } from '@core/store/game.store';
-import { webRTCManager } from '@core/services/webrtc.manager';
+import { useMediaStore } from '@core/store/media.store';
+import { webRTCManager } from '@core/services/webrtc/webrtc.manager';
 
 export class NetworkManager {
   private lastEmitTime = 0;
@@ -69,6 +70,22 @@ export class NetworkManager {
     socketService.on('signal:ice-candidate', ({ fromUserId, candidate }) => {
       webRTCManager.handleIceCandidate(fromUserId, candidate);
     });
+
+    // Screen Share Events
+    socketService.on('screenshare:start', ({ userId }) => {
+      console.log('[NetworkManager] screenshare:start', userId);
+      useMediaStore.getState().addScreenSharingUser(userId);
+    });
+
+    socketService.on('screenshare:stop', ({ userId }) => {
+      console.log('[NetworkManager] screenshare:stop', userId);
+      useMediaStore.getState().removeScreenSharingUser(userId);
+    });
+
+    // Peer Media State Sync
+    socketService.on('media:state', ({ userId, state }) => {
+      useMediaStore.getState().updatePeerMediaState(userId, state);
+    });
   }
 
   public emitMove(x: number, y: number): void {
@@ -100,5 +117,9 @@ export class NetworkManager {
     socketService.off('signal:offer');
     socketService.off('signal:answer');
     socketService.off('signal:ice-candidate');
+
+    // Screen Share Events
+    socketService.off('screenshare:start');
+    socketService.off('screenshare:stop');
   }
 }
