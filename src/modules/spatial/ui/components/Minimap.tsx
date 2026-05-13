@@ -47,25 +47,23 @@ export function Minimap() {
         officeData.height * scale
       );
 
-      // 2. Draw Zones (Assuming zones have x, y, width, height)
+      // 2. Draw Zones
       zones.forEach((zone) => {
-        // Type casting to any to handle potential shape variations in ZoneSnapshot
-        const z = zone as any; 
-        if (z.x !== undefined && z.y !== undefined && z.width && z.height) {
+        if (zone.width > 0 && zone.height > 0) {
           ctx.fillStyle = 'rgba(56, 189, 248, 0.1)'; // soft cyan
           ctx.fillRect(
-            offsetX + z.x * scale,
-            offsetY + z.y * scale,
-            z.width * scale,
-            z.height * scale
+            offsetX + zone.x * scale,
+            offsetY + zone.y * scale,
+            zone.width * scale,
+            zone.height * scale
           );
           ctx.strokeStyle = 'rgba(56, 189, 248, 0.3)';
           ctx.lineWidth = 1;
           ctx.strokeRect(
-            offsetX + z.x * scale,
-            offsetY + z.y * scale,
-            z.width * scale,
-            z.height * scale
+            offsetX + zone.x * scale,
+            offsetY + zone.y * scale,
+            zone.width * scale,
+            zone.height * scale
           );
         }
       });

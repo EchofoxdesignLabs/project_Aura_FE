@@ -147,38 +147,8 @@ export interface MeetingPeerPayload {
   userId: string;
 }
 
-export interface SignalOfferRequest {
-  targetUserId: string;
-  offer: RTCSessionDescriptionInit;
-}
-
-export interface SignalAnswerRequest {
-  targetUserId: string;
-  answer: RTCSessionDescriptionInit;
-}
-
-export interface SignalIceCandidateRequest {
-  targetUserId: string;
-  candidate: RTCIceCandidateInit;
-}
-
-export interface SignalOfferPayload {
-  fromUserId: string;
-  offer: RTCSessionDescriptionInit;
-}
-
-export interface SignalAnswerPayload {
-  fromUserId: string;
-  answer: RTCSessionDescriptionInit;
-}
-
 export interface ScreenSharePayload {
   userId: string;
-}
-
-export interface SignalIceCandidatePayload {
-  fromUserId: string;
-  candidate: RTCIceCandidateInit;
 }
 
 export interface MediaStatePayload {
@@ -189,12 +159,98 @@ export interface MediaStatePayload {
   };
 }
 
+export type SfuMediaTag = 'mic';
+
+export type SfuConsumerCloseReason =
+  | 'distance'
+  | 'left-office'
+  | 'producer-closed'
+  | 'receiver-closed'
+  | 'server-cleanup'
+  | 'worker-died';
+
+export interface SfuGetRouterRtpCapabilitiesResponse {
+  rtpCapabilities: unknown;
+}
+
+export interface SfuCreateWebRtcTransportRequest {
+  direction: 'send' | 'recv';
+  rtpCapabilities?: unknown;
+}
+
+export interface SfuTransportParameters {
+  id: string;
+  iceParameters: unknown;
+  iceCandidates: unknown[];
+  dtlsParameters: unknown;
+  iceServers?: RTCIceServer[];
+}
+
+export interface SfuConnectTransportRequest {
+  transportId: string;
+  dtlsParameters: unknown;
+}
+
+export interface SfuProduceRequest {
+  transportId: string;
+  kind: 'audio';
+  rtpParameters: unknown;
+  appData?: {
+    mediaTag?: SfuMediaTag;
+  };
+}
+
+export interface SfuProduceResponse {
+  producerId: string;
+}
+
+export interface SfuResumeConsumerRequest {
+  consumerId: string;
+}
+
+export interface SfuNewConsumerPayload {
+  consumerId: string;
+  producerId: string;
+  remoteUserId: string;
+  kind: 'audio';
+  rtpParameters: unknown;
+  mediaTag: SfuMediaTag;
+}
+
+export interface SfuConsumerClosedPayload {
+  consumerId: string;
+  producerId?: string;
+  remoteUserId?: string;
+  mediaTag: SfuMediaTag;
+  reason: SfuConsumerCloseReason;
+}
+
+export interface SocketRequestEvents {
+  'sfu:get-router-rtp-capabilities': {
+    payload: Record<string, never>;
+    response: SfuGetRouterRtpCapabilitiesResponse;
+  };
+  'sfu:create-webrtc-transport': {
+    payload: SfuCreateWebRtcTransportRequest;
+    response: SfuTransportParameters;
+  };
+  'sfu:connect-transport': {
+    payload: SfuConnectTransportRequest;
+    response: { connected: true };
+  };
+  'sfu:produce': {
+    payload: SfuProduceRequest;
+    response: SfuProduceResponse;
+  };
+  'sfu:resume-consumer': {
+    payload: SfuResumeConsumerRequest;
+    response: { resumed: true };
+  };
+}
+
 export interface SocketClientToServerEvents {
   'office:join': (payload: OfficeJoinPayload) => void;
   'player:move': (payload: PlayerMovePayload) => void;
-  'signal:offer': (payload: SignalOfferRequest) => void;
-  'signal:answer': (payload: SignalAnswerRequest) => void;
-  'signal:ice-candidate': (payload: SignalIceCandidateRequest) => void;
   'screenshare:start': (payload: Record<string, never>) => void;
   'screenshare:stop': (payload: Record<string, never>) => void;
   'media:state': (payload: { isMicOn?: boolean; isCameraOn?: boolean }) => void;
@@ -212,9 +268,8 @@ export interface SocketServerToClientEvents {
   'meeting:join': (payload: MeetingJoinPayload) => void;
   'meeting:peer-joined': (payload: MeetingPeerPayload) => void;
   'meeting:peer-left': (payload: MeetingPeerPayload) => void;
-  'signal:offer': (payload: SignalOfferPayload) => void;
-  'signal:answer': (payload: SignalAnswerPayload) => void;
-  'signal:ice-candidate': (payload: SignalIceCandidatePayload) => void;
+  'sfu:new-consumer': (payload: SfuNewConsumerPayload) => void;
+  'sfu:consumer-closed': (payload: SfuConsumerClosedPayload) => void;
   'screenshare:start': (payload: ScreenSharePayload) => void;
   'screenshare:stop': (payload: ScreenSharePayload) => void;
   'media:state': (payload: MediaStatePayload) => void;

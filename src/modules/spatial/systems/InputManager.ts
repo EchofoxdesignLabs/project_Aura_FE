@@ -26,7 +26,7 @@ export class InputManager {
       A: Phaser.Input.Keyboard.KeyCodes.A,
       S: Phaser.Input.Keyboard.KeyCodes.S,
       D: Phaser.Input.Keyboard.KeyCodes.D,
-    }) as any;
+    }) as unknown as typeof this.wasdKeys;
   }
 
   /**

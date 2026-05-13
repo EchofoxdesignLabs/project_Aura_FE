@@ -1,7 +1,7 @@
 import { socketService } from '@core/services/socket.service';
+import { sfuManager } from '@core/services/sfu/sfu.manager';
 import { useGameStore } from '@core/store/game.store';
 import { useMediaStore } from '@core/store/media.store';
-import { webRTCManager } from '@core/services/webrtc/webrtc.manager';
 
 export class NetworkManager {
   private lastEmitTime = 0;
@@ -58,17 +58,15 @@ export class NetworkManager {
       useGameStore.getState().removeMeetingParticipant(userId);
     });
 
-    // Phase 10: WebRTC Signaling Events
-    socketService.on('signal:offer', ({ fromUserId, offer }) => {
-      webRTCManager.handleOffer(fromUserId, offer);
+    // SFU Media Events
+    socketService.on('sfu:new-consumer', (payload) => {
+      sfuManager.handleNewConsumer(payload).catch((error) => {
+        console.error('[NetworkManager] Failed to handle SFU consumer:', error);
+      });
     });
 
-    socketService.on('signal:answer', ({ fromUserId, answer }) => {
-      webRTCManager.handleAnswer(fromUserId, answer);
-    });
-
-    socketService.on('signal:ice-candidate', ({ fromUserId, candidate }) => {
-      webRTCManager.handleIceCandidate(fromUserId, candidate);
+    socketService.on('sfu:consumer-closed', (payload) => {
+      sfuManager.handleConsumerClosed(payload);
     });
 
     // Screen Share Events
@@ -113,10 +111,9 @@ export class NetworkManager {
     socketService.off('meeting:peer-joined');
     socketService.off('meeting:peer-left');
     
-    // Phase 10: Cleanup Signaling Events
-    socketService.off('signal:offer');
-    socketService.off('signal:answer');
-    socketService.off('signal:ice-candidate');
+    // SFU Media Events
+    socketService.off('sfu:new-consumer');
+    socketService.off('sfu:consumer-closed');
 
     // Screen Share Events
     socketService.off('screenshare:start');

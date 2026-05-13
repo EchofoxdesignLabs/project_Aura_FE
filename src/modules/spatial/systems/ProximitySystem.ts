@@ -1,5 +1,5 @@
+import { sfuManager } from '@core/services/sfu/sfu.manager';
 import { useGameStore } from '@core/store/game.store';
-import { webRTCManager } from '@core/services/webrtc/webrtc.manager';
 
 const PROXIMITY_RADIUS = 300;
 const FULL_VOLUME_RADIUS = 50;
@@ -7,70 +7,59 @@ const CHECK_INTERVAL = 500;
 
 export class ProximitySystem {
   private intervalId: number | null = null;
-  private connectedPeers: Set<string> = new Set();
 
   public start(): void {
-    if (this.intervalId !== null) return;
+    if (this.intervalId !== null) {
+      return;
+    }
+
     console.log('[ProximitySystem] Started');
     this.intervalId = window.setInterval(() => this.checkProximity(), CHECK_INTERVAL);
   }
 
   public stop(): void {
-    if (this.intervalId !== null) {
-      window.clearInterval(this.intervalId);
-      this.intervalId = null;
-      console.log('[ProximitySystem] Stopped');
+    if (this.intervalId === null) {
+      return;
     }
-    this.disconnectAll();
+
+    window.clearInterval(this.intervalId);
+    this.intervalId = null;
+    console.log('[ProximitySystem] Stopped');
   }
 
   private checkProximity(): void {
     const state = useGameStore.getState();
-    
-    // Stop proximity checks if the user is in a meeting room
-    if (state.inMeeting || !state.localPlayerId) return;
+    if (state.inMeeting || !state.localPlayerId) {
+      return;
+    }
 
     const localPlayer = state.players[state.localPlayerId];
-    if (!localPlayer) return;
-
-    const peersInRange = new Set<string>();
+    if (!localPlayer) {
+      return;
+    }
 
     for (const [userId, player] of Object.entries(state.players)) {
-      if (userId === state.localPlayerId) continue;
+      if (userId === state.localPlayerId) {
+        continue;
+      }
 
       const dx = localPlayer.x - player.x;
       const dy = localPlayer.y - player.y;
       const distance = Math.sqrt(dx * dx + dy * dy);
 
-      if (distance <= PROXIMITY_RADIUS) {
-        peersInRange.add(userId);
-        
-        if (!this.connectedPeers.has(userId)) {
-          this.connectedPeers.add(userId);
-          webRTCManager.connectToPeer(userId);
-        }
-
-        let volume = 1;
-        if (distance > FULL_VOLUME_RADIUS) {
-          volume = 1 - ((distance - FULL_VOLUME_RADIUS) / (PROXIMITY_RADIUS - FULL_VOLUME_RADIUS));
-        }
-        webRTCManager.setAudioVolume(userId, volume);
+      if (distance > PROXIMITY_RADIUS) {
+        continue;
       }
-    }
 
-    for (const userId of this.connectedPeers) {
-      if (!peersInRange.has(userId)) {
-        this.connectedPeers.delete(userId);
-        webRTCManager.disconnectPeer(userId);
-      }
-    }
-  }
+      const volume =
+        distance <= FULL_VOLUME_RADIUS
+          ? 1
+          : 1 -
+            (distance - FULL_VOLUME_RADIUS) /
+              (PROXIMITY_RADIUS - FULL_VOLUME_RADIUS);
 
-  private disconnectAll(): void {
-    for (const userId of this.connectedPeers) {
-      webRTCManager.disconnectPeer(userId);
+      sfuManager.setAudioVolume(userId, volume);
     }
-    this.connectedPeers.clear();
   }
 }
 

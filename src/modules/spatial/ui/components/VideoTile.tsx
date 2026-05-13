@@ -68,8 +68,8 @@ export function VideoTile({
   // ─── Speaking detection (non-local, non-muted only) ───
   useEffect(() => {
     if (isLocal || !stream || isMuted) {
-      setIsSpeaking(false);
-      return;
+      const frameId = requestAnimationFrame(() => setIsSpeaking(false));
+      return () => cancelAnimationFrame(frameId);
     }
 
     const audioTrack = stream.getAudioTracks()[0];

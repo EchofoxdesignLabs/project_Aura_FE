@@ -69,7 +69,9 @@ export class PlayerSprite extends Phaser.GameObjects.Container {
   /**
    * Called every frame by the OfficeScene update loop.
    */
-  public update(_delta: number) {
+  public update(delta: number) {
+    void delta;
+
     // Local player movement is handled directly by Arcade Physics velocity in the scene
     if (this.isLocal) return;
 

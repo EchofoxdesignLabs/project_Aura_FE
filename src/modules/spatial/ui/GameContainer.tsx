@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import Phaser from 'phaser';
 import { useGameStore } from '@core/store/game.store';
 import { useMediaStore } from '@core/store/media.store';
-import { webRTCManager } from '@core/services/webrtc/webrtc.manager';
+import { sfuManager } from '@core/services/sfu/sfu.manager';
 import { OfficeScene } from '../scenes/OfficeScene';
 import { HUD } from './HUD';
 import { ProximityIndicator } from './ProximityIndicator';
@@ -24,22 +24,26 @@ export function GameContainer() {
     if (!gameContainerRef.current || !currentOfficeId) {
       return;
     }
-    // Initialize media FIRST, then start proximity/meeting systems.
-    // If proximity starts before getUserMedia resolves, peer connections
-    // are created without tracks → no audio/video is ever exchanged.
-    initMedia()
-      .then(() => {
+    let isMounted = true;
+
+    // Initialize SFU connection FIRST, then request media.
+    // This ensures even users without mics (or who deny access) can hear others.
+    sfuManager.initialize()
+      .then(() => initMedia())
+      .then(async () => {
+        if (!isMounted) return;
         const stream = useMediaStore.getState().localStream;
-        if (stream) {
-          webRTCManager.setLocalStream(stream);
+        const audioTrack = stream?.getAudioTracks()[0];
+        if (audioTrack && audioTrack.readyState !== 'ended') {
+          await sfuManager.startMicProducer(audioTrack);
         }
       })
       .catch((error) => {
-        console.warn('[GameContainer] Media access denied or unavailable. Office will load without voice/video.', error);
+        if (!isMounted) return;
+        console.warn('[GameContainer] Media access denied or SFU setup failed. Office will load without voice.', error);
       })
       .finally(() => {
-        // Start systems AFTER media resolves (or fails).
-        // This guarantees localStream is set before any peer connections are created.
+        if (!isMounted) return;
         meetingSystem.init();
         proximitySystem.start();
       });
@@ -65,7 +69,7 @@ export function GameContainer() {
       };
       
       gameRef.current = new Phaser.Game(config);
-      setIsEngineReady(true);
+      queueMicrotask(() => setIsEngineReady(true));
     }
 
     const handleResize = () => {
@@ -77,13 +81,13 @@ export function GameContainer() {
 
     return () => {
       console.log('[GameContainer] Destroying Phaser instance...');
+      isMounted = false;
       window.removeEventListener('resize', handleResize);
       
       // Cleanup: Disconnect all peers and stop hardware tracks
       meetingSystem.destroy();
       proximitySystem.stop();
-      webRTCManager.disconnectAll();
-      webRTCManager.setLocalStream(null);
+      sfuManager.destroy();
       stopMedia();
       
       if (gameRef.current) {

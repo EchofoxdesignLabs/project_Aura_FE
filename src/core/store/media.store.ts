@@ -6,13 +6,9 @@ interface MediaStoreData {
   isCameraOn: boolean;
   isMediaInitialized: boolean;
   remoteStreams: Record<string, MediaStream>;
-
-  // ─── Screen Share ───
   screenStream: MediaStream | null;
   isScreenSharing: boolean;
   screenSharingUsers: string[];
-
-  // ─── Peer State Tracking ───
   peerMediaStates: Record<string, { isMicOn: boolean; isCameraOn: boolean }>;
 }
 
@@ -24,15 +20,14 @@ export interface MediaState extends MediaStoreData {
   addRemoteStream: (userId: string, stream: MediaStream) => void;
   removeRemoteStream: (userId: string) => void;
   clearAllRemoteStreams: () => void;
-
-  // ─── Screen Share ───
   startScreenShare: () => Promise<void>;
   stopScreenShare: () => void;
   addScreenSharingUser: (userId: string) => void;
   removeScreenSharingUser: (userId: string) => void;
-
-  // ─── Peer State Tracking ───
-  updatePeerMediaState: (userId: string, state: Partial<{ isMicOn: boolean; isCameraOn: boolean }>) => void;
+  updatePeerMediaState: (
+    userId: string,
+    state: Partial<{ isMicOn: boolean; isCameraOn: boolean }>,
+  ) => void;
 }
 
 function createInitialMediaData(): MediaStoreData {
@@ -55,8 +50,17 @@ function stopStreamTracks(stream: MediaStream | null | undefined): void {
   });
 }
 
+function emitMediaState(state: { isMicOn?: boolean; isCameraOn?: boolean }): void {
+  import('@core/services/socket.service').then(({ socketService }) => {
+    if (socketService.isConnected()) {
+      socketService.emit('media:state', state);
+    }
+  });
+}
+
 export const useMediaStore = create<MediaState>()((set, get) => ({
   ...createInitialMediaData(),
+
   initMedia: async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error('Media devices API is not available in this browser.');
@@ -64,7 +68,7 @@ export const useMediaStore = create<MediaState>()((set, get) => ({
 
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: true,
-      video: true,
+      video: false,
     });
 
     const previousStream = get().localStream;
@@ -73,15 +77,15 @@ export const useMediaStore = create<MediaState>()((set, get) => ({
     }
 
     const audioTrack = stream.getAudioTracks()[0];
-    const videoTrack = stream.getVideoTracks()[0];
 
     set(() => ({
       localStream: stream,
       isMicOn: audioTrack?.enabled ?? false,
-      isCameraOn: videoTrack?.enabled ?? false,
+      isCameraOn: false,
       isMediaInitialized: true,
     }));
   },
+
   stopMedia: () => {
     const { localStream, screenStream } = get();
     stopStreamTracks(localStream);
@@ -96,6 +100,7 @@ export const useMediaStore = create<MediaState>()((set, get) => ({
       isMediaInitialized: false,
     }));
   },
+
   toggleMic: () => {
     const audioTrack = get().localStream?.getAudioTracks()[0];
     if (!audioTrack) {
@@ -103,77 +108,14 @@ export const useMediaStore = create<MediaState>()((set, get) => ({
     }
 
     audioTrack.enabled = !audioTrack.enabled;
-    const newState = audioTrack.enabled;
-    set(() => ({
-      isMicOn: newState,
-    }));
-    
-    // Notify peers that our mic state changed
-    import('@core/services/socket.service').then(({ socketService }) => {
-      socketService.emit('media:state', { isMicOn: newState, isCameraOn: get().isCameraOn });
-    });
+    const isMicOn = audioTrack.enabled;
+
+    set(() => ({ isMicOn }));
+    emitMediaState({ isMicOn, isCameraOn: get().isCameraOn });
   },
 
-  // Camera toggle: actually stops/releases the hardware (LED goes off).
-  // When re-enabling, getUserMedia is called again to re-acquire the camera.
   toggleCamera: () => {
-    const { localStream, isCameraOn, isMicOn } = get();
-    if (!localStream) return;
-
-    if (isCameraOn) {
-      // ─── Turn OFF: stop track → release hardware → replace on peers with null ───
-      const videoTrack = localStream.getVideoTracks()[0];
-      if (videoTrack) {
-        localStream.removeTrack(videoTrack);
-        videoTrack.stop(); // Releases hardware — camera LED goes off
-      }
-      
-      // Clone stream so the local VideoTile receives a fresh reference and updates cleanly
-      const clonedStream = new MediaStream(localStream.getTracks());
-      
-      // Replace video on peers with null (they see black/initials)
-      import('@core/services/webrtc/webrtc.manager').then(({ webRTCManager }) => {
-        // Must update local store reference too so the UI rebinds and hides the local video
-        webRTCManager.setLocalStream(clonedStream);
-        webRTCManager.replaceVideoTrackOnPeers(null);
-      });
-      
-      set({ isCameraOn: false, localStream: clonedStream });
-      
-      import('@core/services/socket.service').then(({ socketService }) => {
-        socketService.emit('media:state', { isMicOn, isCameraOn: false });
-      });
-    } else {
-      // ─── Turn ON: re-acquire camera → add to stream → replace on peers ───
-      navigator.mediaDevices
-        .getUserMedia({ video: true })
-        .then((newStream) => {
-          const newVideoTrack = newStream.getVideoTracks()[0];
-          const currentStream = get().localStream;
-          if (currentStream) {
-            currentStream.addTrack(newVideoTrack);
-            
-            // Clone the stream to force React's useEffect to run correctly and show the local camera!
-            const clonedStream = new MediaStream(currentStream.getTracks());
-            
-            import('@core/services/webrtc/webrtc.manager').then(({ webRTCManager }) => {
-              webRTCManager.setLocalStream(clonedStream);
-              webRTCManager.replaceVideoTrackOnPeers(newVideoTrack);
-            });
-            
-            set({ isCameraOn: true, localStream: clonedStream });
-          } else {
-             set({ isCameraOn: true });
-          }
-          
-          import('@core/services/socket.service').then(({ socketService }) => {
-            socketService.emit('media:state', { isMicOn, isCameraOn: true });
-          });
-        })
-        .catch((err) => {
-          console.warn('[mediaStore] Failed to re-acquire camera:', err);
-        });
-    }
+    console.warn('[mediaStore] Camera is disabled during the Phase 1 audio-only SFU migration.');
   },
 
   addRemoteStream: (userId, stream) => {
@@ -193,6 +135,7 @@ export const useMediaStore = create<MediaState>()((set, get) => ({
       },
     }));
   },
+
   removeRemoteStream: (userId) => {
     const currentStream = get().remoteStreams[userId];
     if (!currentStream) {
@@ -209,6 +152,7 @@ export const useMediaStore = create<MediaState>()((set, get) => ({
       };
     });
   },
+
   clearAllRemoteStreams: () => {
     Object.values(get().remoteStreams).forEach((stream) => {
       stopStreamTracks(stream);
@@ -221,75 +165,13 @@ export const useMediaStore = create<MediaState>()((set, get) => ({
     }));
   },
 
-  // ─── Peer State Tracking Mutations ───
-  updatePeerMediaState: (userId, state) => {
-    set((s) => ({
-      peerMediaStates: {
-        ...s.peerMediaStates,
-        [userId]: {
-          ...(s.peerMediaStates[userId] || { isMicOn: true, isCameraOn: true }),
-          ...state,
-        },
-      },
-    }));
-  },
-
-  // ─── Screen Share Actions ───
-
   startScreenShare: async () => {
-    try {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          displaySurface: 'monitor',
-          frameRate: 15,
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-        audio: false,
-      });
-
-      // Auto-cleanup when browser's native "Stop sharing" button is clicked
-      const videoTrack = screenStream.getVideoTracks()[0];
-      videoTrack.addEventListener('ended', () => {
-        get().stopScreenShare();
-      });
-
-      set({ screenStream, isScreenSharing: true });
-
-      // Replace camera track with screen track on all peer connections
-      const { webRTCManager } = await import('@core/services/webrtc/webrtc.manager');
-      webRTCManager.handleLocalScreenShareStart(screenStream);
-
-      // Broadcast to room via socket
-      const { socketService } = await import('@core/services/socket.service');
-      socketService.emit('screenshare:start', {} as Record<string, never>);
-
-      console.log('[mediaStore] Screen share started');
-    } catch (err) {
-      // User cancelled the picker — not an error
-      console.log('[mediaStore] Screen share cancelled or failed:', err);
-    }
+    console.warn('[mediaStore] Screen share is disabled during the Phase 1 audio-only SFU migration.');
   },
 
   stopScreenShare: () => {
-    const { screenStream, localStream } = get();
-
-    // Stop all screen tracks
-    screenStream?.getTracks().forEach((t) => t.stop());
-
+    stopStreamTracks(get().screenStream);
     set({ screenStream: null, isScreenSharing: false });
-
-    // Restore camera track on all peer connections
-    import('@core/services/webrtc/webrtc.manager').then(({ webRTCManager }) => {
-      webRTCManager.handleLocalScreenShareStop(localStream);
-    });
-
-    // Notify other users
-    import('@core/services/socket.service').then(({ socketService }) => {
-      socketService.emit('screenshare:stop', {} as Record<string, never>);
-    });
-
-    console.log('[mediaStore] Screen share stopped');
   },
 
   addScreenSharingUser: (userId) =>
@@ -303,4 +185,19 @@ export const useMediaStore = create<MediaState>()((set, get) => ({
     set((state) => ({
       screenSharingUsers: state.screenSharingUsers.filter((id) => id !== userId),
     })),
+
+  updatePeerMediaState: (userId, state) => {
+    set((current) => ({
+      peerMediaStates: {
+        ...current.peerMediaStates,
+        [userId]: {
+          ...(current.peerMediaStates[userId] || {
+            isMicOn: true,
+            isCameraOn: false,
+          }),
+          ...state,
+        },
+      },
+    }));
+  },
 }));
