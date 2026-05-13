@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 
 interface VideoTileProps {
-  stream: MediaStream | null;
+  videoStream: MediaStream | null;
+  audioStream?: MediaStream | null;
   userName: string;
   userId: string;
   isLocal?: boolean;
@@ -41,7 +42,8 @@ function getInitials(name: string): string {
 }
 
 export function VideoTile({
-  stream,
+  videoStream,
+  audioStream,
   userName,
   userId,
   isLocal = false,
@@ -59,20 +61,23 @@ export function VideoTile({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    video.srcObject = stream;
+    video.srcObject = videoStream;
     return () => {
       video.srcObject = null;
     };
-  }, [stream]);
+  }, [videoStream]);
 
   // ─── Speaking detection (non-local, non-muted only) ───
+  // Use audioStream (separate mic stream) for analysis; fall back to videoStream
   useEffect(() => {
-    if (isLocal || !stream || isMuted) {
+    const analysisStream = audioStream ?? videoStream;
+
+    if (isLocal || !analysisStream || isMuted) {
       const frameId = requestAnimationFrame(() => setIsSpeaking(false));
       return () => cancelAnimationFrame(frameId);
     }
 
-    const audioTrack = stream.getAudioTracks()[0];
+    const audioTrack = analysisStream.getAudioTracks()[0];
     if (!audioTrack) return;
 
     let audioCtx: AudioContext;
@@ -82,7 +87,7 @@ export function VideoTile({
       return;
     }
 
-    const source = audioCtx.createMediaStreamSource(stream);
+    const source = audioCtx.createMediaStreamSource(analysisStream);
     const analyser = audioCtx.createAnalyser();
     analyser.fftSize = 256;
     analyser.smoothingTimeConstant = 0.4;
@@ -108,11 +113,11 @@ export function VideoTile({
       audioCtx.close();
       setIsSpeaking(false);
     };
-  }, [stream, isLocal, isMuted]);
+  }, [audioStream, videoStream, isLocal, isMuted]);
 
   // ─── Computed ───
   const px = SIZE_MAP[size];
-  const showVideo = stream && (isCameraOn || isScreenShare);
+  const showVideo = videoStream && (isCameraOn || isScreenShare);
   const initials = getInitials(userName);
   const avatarColor = getAvatarColor(userId);
 

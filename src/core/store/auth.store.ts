@@ -223,7 +223,7 @@ export const useAuthStore = create<AuthState>()((set) => ({
 
     const mediaStore = useMediaStore.getState();
     mediaStore.stopMedia();
-    mediaStore.clearAllRemoteStreams();
+    mediaStore.clearAllRemoteMedia();
 
     resetAuthState(set);
   },

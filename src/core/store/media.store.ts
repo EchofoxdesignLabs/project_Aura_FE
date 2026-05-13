@@ -1,11 +1,13 @@
 import { create } from 'zustand';
 
+import type { RemoteUserMedia, SfuMediaTag } from '@core/types';
+
 interface MediaStoreData {
   localStream: MediaStream | null;
   isMicOn: boolean;
   isCameraOn: boolean;
   isMediaInitialized: boolean;
-  remoteStreams: Record<string, MediaStream>;
+  remoteMedia: Record<string, RemoteUserMedia>;
   screenStream: MediaStream | null;
   isScreenSharing: boolean;
   screenSharingUsers: string[];
@@ -17,9 +19,10 @@ export interface MediaState extends MediaStoreData {
   stopMedia: () => void;
   toggleMic: () => void;
   toggleCamera: () => void;
-  addRemoteStream: (userId: string, stream: MediaStream) => void;
-  removeRemoteStream: (userId: string) => void;
-  clearAllRemoteStreams: () => void;
+  setRemoteMediaStream: (userId: string, mediaTag: SfuMediaTag, stream: MediaStream) => void;
+  removeRemoteMediaStream: (userId: string, mediaTag: SfuMediaTag) => void;
+  removeAllRemoteMediaForUser: (userId: string) => void;
+  clearAllRemoteMedia: () => void;
   startScreenShare: () => Promise<void>;
   stopScreenShare: () => void;
   addScreenSharingUser: (userId: string) => void;
@@ -36,7 +39,7 @@ function createInitialMediaData(): MediaStoreData {
     isMicOn: false,
     isCameraOn: false,
     isMediaInitialized: false,
-    remoteStreams: {},
+    remoteMedia: {},
     screenStream: null,
     isScreenSharing: false,
     screenSharingUsers: [],
@@ -66,22 +69,47 @@ export const useMediaStore = create<MediaState>()((set, get) => ({
       throw new Error('Media devices API is not available in this browser.');
     }
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: false,
-    });
+    let stream: MediaStream | null = null;
+
+    // Try audio + video first
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: true,
+      });
+    } catch {
+      // Camera denied or unavailable — try audio only
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: false,
+        });
+      } catch {
+        // Mic also denied — try video only
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: true,
+          });
+        } catch {
+          // Both denied — proceed with no media
+          console.warn('[mediaStore] All media permissions denied. Office will load without media.');
+        }
+      }
+    }
 
     const previousStream = get().localStream;
     if (previousStream && previousStream !== stream) {
       stopStreamTracks(previousStream);
     }
 
-    const audioTrack = stream.getAudioTracks()[0];
+    const audioTrack = stream?.getAudioTracks()[0];
+    const videoTrack = stream?.getVideoTracks()[0];
 
     set(() => ({
       localStream: stream,
       isMicOn: audioTrack?.enabled ?? false,
-      isCameraOn: false,
+      isCameraOn: videoTrack?.enabled ?? false,
       isMediaInitialized: true,
     }));
   },
@@ -112,65 +140,174 @@ export const useMediaStore = create<MediaState>()((set, get) => ({
 
     set(() => ({ isMicOn }));
     emitMediaState({ isMicOn, isCameraOn: get().isCameraOn });
+
+    // Pause/resume mic producer on the SFU
+    import('@core/services/sfu/sfu.manager').then(({ sfuManager }) => {
+      if (isMicOn) {
+        sfuManager.resumeMicProducer().catch((err) => {
+          console.error('[mediaStore] Failed to resume mic producer:', err);
+        });
+      } else {
+        sfuManager.pauseMicProducer().catch((err) => {
+          console.error('[mediaStore] Failed to pause mic producer:', err);
+        });
+      }
+    });
   },
 
   toggleCamera: () => {
-    console.warn('[mediaStore] Camera is disabled during the Phase 1 audio-only SFU migration.');
+    const { localStream, isCameraOn } = get();
+
+    import('@core/services/sfu/sfu.manager').then(({ sfuManager }) => {
+      if (isCameraOn) {
+        // Turn camera off — stop the video track and close the camera producer
+        const videoTrack = localStream?.getVideoTracks()[0];
+        if (videoTrack) {
+          videoTrack.stop();
+          localStream?.removeTrack(videoTrack);
+        }
+
+        sfuManager.stopCameraProducer().catch((err) => {
+          console.error('[mediaStore] Failed to stop camera producer:', err);
+        });
+
+        set(() => ({ isCameraOn: false }));
+        emitMediaState({ isMicOn: get().isMicOn, isCameraOn: false });
+      } else {
+        // Turn camera on — acquire a new video track and start camera producer
+        navigator.mediaDevices
+          .getUserMedia({ video: true, audio: false })
+          .then(async (cameraStream) => {
+            const newVideoTrack = cameraStream.getVideoTracks()[0];
+            if (!newVideoTrack) return;
+
+            // Add video track to localStream so UI can render self-view
+            const currentStream = get().localStream;
+            if (currentStream) {
+              currentStream.addTrack(newVideoTrack);
+            }
+
+            await sfuManager.startCameraProducer(newVideoTrack);
+            set(() => ({ isCameraOn: true }));
+            emitMediaState({ isMicOn: get().isMicOn, isCameraOn: true });
+          })
+          .catch((err) => {
+            console.error('[mediaStore] Failed to acquire camera:', err);
+          });
+      }
+    });
   },
 
-  addRemoteStream: (userId, stream) => {
-    const currentStream = get().remoteStreams[userId];
-    if (currentStream === stream) {
-      return;
-    }
-
-    if (currentStream) {
-      stopStreamTracks(currentStream);
-    }
-
-    set((state) => ({
-      remoteStreams: {
-        ...state.remoteStreams,
-        [userId]: stream,
-      },
-    }));
-  },
-
-  removeRemoteStream: (userId) => {
-    const currentStream = get().remoteStreams[userId];
-    if (!currentStream) {
-      return;
-    }
-
-    stopStreamTracks(currentStream);
-
+  setRemoteMediaStream: (userId, mediaTag, stream) => {
     set((state) => {
-      const remainingStreams = { ...state.remoteStreams };
-      delete remainingStreams[userId];
+      const existing = state.remoteMedia[userId] ?? {};
+      const currentStream = existing[mediaTag];
+      if (currentStream === stream) return {};
+
+      if (currentStream) {
+        stopStreamTracks(currentStream);
+      }
+
       return {
-        remoteStreams: remainingStreams,
+        remoteMedia: {
+          ...state.remoteMedia,
+          [userId]: {
+            ...existing,
+            [mediaTag]: stream,
+          },
+        },
       };
     });
   },
 
-  clearAllRemoteStreams: () => {
-    Object.values(get().remoteStreams).forEach((stream) => {
-      stopStreamTracks(stream);
+  removeRemoteMediaStream: (userId, mediaTag) => {
+    set((state) => {
+      const existing = state.remoteMedia[userId];
+      if (!existing || !existing[mediaTag]) return {};
+
+      const currentStream = existing[mediaTag];
+      if (currentStream) {
+        stopStreamTracks(currentStream);
+      }
+
+      const updated = { ...existing };
+      delete updated[mediaTag];
+
+      // If no more streams for this user, remove the user entry entirely
+      if (!updated.mic && !updated.camera && !updated.screen) {
+        const remainingMedia = { ...state.remoteMedia };
+        delete remainingMedia[userId];
+        return { remoteMedia: remainingMedia };
+      }
+
+      return {
+        remoteMedia: {
+          ...state.remoteMedia,
+          [userId]: updated,
+        },
+      };
     });
+  },
+
+  removeAllRemoteMediaForUser: (userId) => {
+    const existing = get().remoteMedia[userId];
+    if (!existing) return;
+
+    if (existing.mic) stopStreamTracks(existing.mic);
+    if (existing.camera) stopStreamTracks(existing.camera);
+    if (existing.screen) stopStreamTracks(existing.screen);
+
+    set((state) => {
+      const remainingMedia = { ...state.remoteMedia };
+      delete remainingMedia[userId];
+      return { remoteMedia: remainingMedia };
+    });
+  },
+
+  clearAllRemoteMedia: () => {
+    const allMedia = get().remoteMedia;
+    for (const userMedia of Object.values(allMedia)) {
+      if (userMedia.mic) stopStreamTracks(userMedia.mic);
+      if (userMedia.camera) stopStreamTracks(userMedia.camera);
+      if (userMedia.screen) stopStreamTracks(userMedia.screen);
+    }
 
     set(() => ({
-      remoteStreams: {},
+      remoteMedia: {},
       screenSharingUsers: [],
       peerMediaStates: {},
     }));
   },
 
   startScreenShare: async () => {
-    console.warn('[mediaStore] Screen share is disabled during the Phase 1 audio-only SFU migration.');
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false,
+      });
+
+      const screenTrack = screenStream.getVideoTracks()[0];
+      if (!screenTrack) return;
+
+      const { sfuManager } = await import('@core/services/sfu/sfu.manager');
+      await sfuManager.startScreenShareProducer(screenTrack);
+
+      set(() => ({ screenStream, isScreenSharing: true }));
+    } catch (err) {
+      console.error('[mediaStore] Failed to start screen share:', err);
+    }
   },
 
   stopScreenShare: () => {
-    stopStreamTracks(get().screenStream);
+    const { screenStream } = get();
+    stopStreamTracks(screenStream);
+
+    import('@core/services/sfu/sfu.manager').then(({ sfuManager }) => {
+      sfuManager.stopScreenShareProducer().catch((err) => {
+        console.error('[mediaStore] Failed to stop screen share producer:', err);
+      });
+    });
+
     set({ screenStream: null, isScreenSharing: false });
   },
 

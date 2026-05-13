@@ -33,9 +33,17 @@ export function GameContainer() {
       .then(async () => {
         if (!isMounted) return;
         const stream = useMediaStore.getState().localStream;
+
+        // Start mic producer if audio track available
         const audioTrack = stream?.getAudioTracks()[0];
         if (audioTrack && audioTrack.readyState !== 'ended') {
           await sfuManager.startMicProducer(audioTrack);
+        }
+
+        // Start camera producer if video track available
+        const videoTrack = stream?.getVideoTracks()[0];
+        if (videoTrack && videoTrack.readyState !== 'ended') {
+          await sfuManager.startCameraProducer(videoTrack);
         }
       })
       .catch((error) => {

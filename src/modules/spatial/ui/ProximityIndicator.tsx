@@ -8,17 +8,19 @@ export function ProximityIndicator() {
   const inMeeting = useGameStore((state) => state.inMeeting);
   const players = useGameStore((state) => state.players);
   const localPlayerId = useGameStore((state) => state.localPlayerId);
-  const remoteStreams = useMediaStore((state) => state.remoteStreams);
+  const remoteMedia = useMediaStore((state) => state.remoteMedia);
   const peerMediaStates = useMediaStore((state) => state.peerMediaStates);
   const localStream = useMediaStore((state) => state.localStream);
   const isMicOn = useMediaStore((state) => state.isMicOn);
+  const isCameraOn = useMediaStore((state) => state.isCameraOn);
   const localUser = useAuthStore((state) => state.user);
 
   if (inMeeting) {
     return null;
   }
 
-  const activePeerIds = Object.keys(remoteStreams);
+  // Active peers = users who have any remote media (mic, camera, or screen)
+  const activePeerIds = Object.keys(remoteMedia);
   if (activePeerIds.length === 0 && !localStream) {
     return null;
   }
@@ -46,12 +48,12 @@ export function ProximityIndicator() {
       {localStream && (
         <div title="You" className="animate-scaleIn">
           <VideoTile
-            stream={localStream}
+            videoStream={localStream}
             userName={localUser?.name ?? 'You'}
             userId={localPlayerId ?? ''}
             isLocal={true}
             isMuted={!isMicOn}
-            isCameraOn={false}
+            isCameraOn={isCameraOn}
             size="sm"
             shape="circle"
           />
@@ -68,23 +70,29 @@ export function ProximityIndicator() {
         />
       )}
 
-      {activePeerIds.map((userId) => (
-        <div
-          key={userId}
-          title={players[userId]?.name ?? userId}
-          className="animate-scaleIn"
-        >
-          <VideoTile
-            stream={remoteStreams[userId] ?? null}
-            userName={players[userId]?.name ?? 'Unknown'}
-            userId={userId}
-            isMuted={!(peerMediaStates[userId]?.isMicOn ?? true)}
-            isCameraOn={false}
-            size="sm"
-            shape="circle"
-          />
-        </div>
-      ))}
+      {activePeerIds.map((userId) => {
+        const userMedia = remoteMedia[userId];
+        const hasCamera = !!userMedia?.camera;
+
+        return (
+          <div
+            key={userId}
+            title={players[userId]?.name ?? userId}
+            className="animate-scaleIn"
+          >
+            <VideoTile
+              videoStream={hasCamera ? userMedia.camera! : null}
+              audioStream={userMedia?.mic ?? null}
+              userName={players[userId]?.name ?? 'Unknown'}
+              userId={userId}
+              isMuted={!(peerMediaStates[userId]?.isMicOn ?? true)}
+              isCameraOn={hasCamera}
+              size="sm"
+              shape="circle"
+            />
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -159,15 +159,23 @@ export interface MediaStatePayload {
   };
 }
 
-export type SfuMediaTag = 'mic';
+export type SfuMediaTag = 'mic' | 'camera' | 'screen';
 
 export type SfuConsumerCloseReason =
   | 'distance'
   | 'left-office'
+  | 'left-meeting'
   | 'producer-closed'
   | 'receiver-closed'
+  | 'transport-closed'
   | 'server-cleanup'
   | 'worker-died';
+
+export interface RemoteUserMedia {
+  mic?: MediaStream;
+  camera?: MediaStream;
+  screen?: MediaStream;
+}
 
 export interface SfuGetRouterRtpCapabilitiesResponse {
   rtpCapabilities: unknown;
@@ -193,10 +201,10 @@ export interface SfuConnectTransportRequest {
 
 export interface SfuProduceRequest {
   transportId: string;
-  kind: 'audio';
+  kind: 'audio' | 'video';
   rtpParameters: unknown;
-  appData?: {
-    mediaTag?: SfuMediaTag;
+  appData: {
+    mediaTag: SfuMediaTag;
   };
 }
 
@@ -208,11 +216,24 @@ export interface SfuResumeConsumerRequest {
   consumerId: string;
 }
 
+export interface SfuCloseProducerRequest {
+  producerId?: string;
+  mediaTag?: SfuMediaTag;
+}
+
+export interface SfuPauseProducerRequest {
+  mediaTag: SfuMediaTag;
+}
+
+export interface SfuResumeProducerRequest {
+  mediaTag: SfuMediaTag;
+}
+
 export interface SfuNewConsumerPayload {
   consumerId: string;
   producerId: string;
   remoteUserId: string;
-  kind: 'audio';
+  kind: 'audio' | 'video';
   rtpParameters: unknown;
   mediaTag: SfuMediaTag;
 }
@@ -244,6 +265,18 @@ export interface SocketRequestEvents {
   };
   'sfu:resume-consumer': {
     payload: SfuResumeConsumerRequest;
+    response: { resumed: true };
+  };
+  'sfu:close-producer': {
+    payload: SfuCloseProducerRequest;
+    response: { closed: true };
+  };
+  'sfu:pause-producer': {
+    payload: SfuPauseProducerRequest;
+    response: { paused: true };
+  };
+  'sfu:resume-producer': {
+    payload: SfuResumeProducerRequest;
     response: { resumed: true };
   };
 }

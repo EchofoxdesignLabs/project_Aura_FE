@@ -1,5 +1,4 @@
 import { socketService } from '@core/services/socket.service';
-import { sfuManager } from '@core/services/sfu/sfu.manager';
 import { useGameStore } from '@core/store/game.store';
 import { useMediaStore } from '@core/store/media.store';
 
@@ -58,16 +57,6 @@ export class NetworkManager {
       useGameStore.getState().removeMeetingParticipant(userId);
     });
 
-    // SFU Media Events
-    socketService.on('sfu:new-consumer', (payload) => {
-      sfuManager.handleNewConsumer(payload).catch((error) => {
-        console.error('[NetworkManager] Failed to handle SFU consumer:', error);
-      });
-    });
-
-    socketService.on('sfu:consumer-closed', (payload) => {
-      sfuManager.handleConsumerClosed(payload);
-    });
 
     // Screen Share Events
     socketService.on('screenshare:start', ({ userId }) => {
@@ -111,9 +100,6 @@ export class NetworkManager {
     socketService.off('meeting:peer-joined');
     socketService.off('meeting:peer-left');
     
-    // SFU Media Events
-    socketService.off('sfu:new-consumer');
-    socketService.off('sfu:consumer-closed');
 
     // Screen Share Events
     socketService.off('screenshare:start');

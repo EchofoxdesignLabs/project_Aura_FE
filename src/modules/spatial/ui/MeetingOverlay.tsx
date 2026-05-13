@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Maximize2, Mic, MicOff, Minimize2 } from 'lucide-react';
+import { Camera, CameraOff, Maximize2, Mic, MicOff, Minimize2, Monitor, MonitorOff } from 'lucide-react';
 
 import { useAuthStore } from '@core/store/auth.store';
 import { useGameStore } from '@core/store/game.store';
@@ -20,11 +20,18 @@ export function MeetingOverlay() {
   const zones = useGameStore((state) => state.zones);
   const players = useGameStore((state) => state.players);
   const localPlayerId = useGameStore((state) => state.localPlayerId);
-  const remoteStreams = useMediaStore((state) => state.remoteStreams);
+  const remoteMedia = useMediaStore((state) => state.remoteMedia);
   const peerMediaStates = useMediaStore((state) => state.peerMediaStates);
   const localStream = useMediaStore((state) => state.localStream);
+  const screenStream = useMediaStore((state) => state.screenStream);
   const isMicOn = useMediaStore((state) => state.isMicOn);
+  const isCameraOn = useMediaStore((state) => state.isCameraOn);
+  const isScreenSharing = useMediaStore((state) => state.isScreenSharing);
   const toggleMic = useMediaStore((state) => state.toggleMic);
+  const toggleCamera = useMediaStore((state) => state.toggleCamera);
+  const startScreenShare = useMediaStore((state) => state.startScreenShare);
+  const stopScreenShare = useMediaStore((state) => state.stopScreenShare);
+  const screenSharingUsers = useMediaStore((state) => state.screenSharingUsers);
   const localUser = useAuthStore((state) => state.user);
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -38,18 +45,49 @@ export function MeetingOverlay() {
     (id) => id !== localPlayerId,
   );
 
+  // Find the active screen sharer (local or remote)
+  const activeScreenSharer = isScreenSharing
+    ? localPlayerId
+    : screenSharingUsers.find((uid) => meetingParticipants.includes(uid)) ?? null;
+
   const controlsBar = (
-    <button
-      onClick={toggleMic}
-      className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
-        isMicOn
-          ? 'bg-slate-700 text-white hover:bg-slate-600'
-          : 'bg-rose-500/20 text-rose-500 hover:bg-rose-500/30'
-      }`}
-      title={isMicOn ? 'Mute' : 'Unmute'}
-    >
-      {isMicOn ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
-    </button>
+    <div className="flex items-center gap-2">
+      <button
+        onClick={toggleMic}
+        className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
+          isMicOn
+            ? 'bg-slate-700 text-white hover:bg-slate-600'
+            : 'bg-rose-500/20 text-rose-500 hover:bg-rose-500/30'
+        }`}
+        title={isMicOn ? 'Mute' : 'Unmute'}
+      >
+        {isMicOn ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+      </button>
+
+      <button
+        onClick={toggleCamera}
+        className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
+          isCameraOn
+            ? 'bg-slate-700 text-white hover:bg-slate-600'
+            : 'bg-slate-700/50 text-slate-400 hover:bg-slate-600'
+        }`}
+        title={isCameraOn ? 'Turn off camera' : 'Turn on camera'}
+      >
+        {isCameraOn ? <Camera className="h-4 w-4" /> : <CameraOff className="h-4 w-4" />}
+      </button>
+
+      <button
+        onClick={isScreenSharing ? stopScreenShare : startScreenShare}
+        className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
+          isScreenSharing
+            ? 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
+            : 'bg-slate-700/50 text-slate-400 hover:bg-slate-600'
+        }`}
+        title={isScreenSharing ? 'Stop sharing' : 'Share screen'}
+      >
+        {isScreenSharing ? <MonitorOff className="h-4 w-4" /> : <Monitor className="h-4 w-4" />}
+      </button>
+    </div>
   );
 
   if (isExpanded) {
@@ -98,18 +136,56 @@ export function MeetingOverlay() {
           </div>
         </div>
 
+        {/* ─── Featured screen share tile ─── */}
+        {activeScreenSharer && (
+          <div
+            className="mx-4 mt-3 overflow-hidden rounded-xl"
+            style={{
+              minHeight: 240,
+              maxHeight: '50vh',
+              border: '1px solid rgba(59,130,246,0.3)',
+              backgroundColor: '#000',
+            }}
+          >
+            <VideoTile
+              videoStream={
+                activeScreenSharer === localPlayerId
+                  ? screenStream
+                  : remoteMedia[activeScreenSharer]?.screen ?? null
+              }
+              audioStream={
+                activeScreenSharer === localPlayerId
+                  ? localStream
+                  : remoteMedia[activeScreenSharer]?.mic ?? null
+              }
+              userName={
+                activeScreenSharer === localPlayerId
+                  ? (localUser?.name ?? 'You')
+                  : (players[activeScreenSharer]?.name ?? 'Unknown')
+              }
+              userId={activeScreenSharer}
+              isLocal={activeScreenSharer === localPlayerId}
+              isMuted={false}
+              isCameraOn={true}
+              isScreenShare={true}
+              size="full"
+              shape="rect"
+            />
+          </div>
+        )}
+
         <div className={`grid flex-1 ${getGridCols(remoteParticipants.length + 1)} gap-3 overflow-y-auto p-4 auto-rows-fr`}>
           <div
             className="animate-scaleIn overflow-hidden rounded-xl"
             style={{ minHeight: 180, border: '1px solid rgba(255,255,255,0.06)' }}
           >
             <VideoTile
-              stream={localStream}
+              videoStream={localStream}
               userName={localUser?.name ?? 'You'}
               userId={localPlayerId ?? ''}
               isLocal={true}
               isMuted={!isMicOn}
-              isCameraOn={false}
+              isCameraOn={isCameraOn}
               size="full"
               shape="rect"
             />
@@ -122,11 +198,12 @@ export function MeetingOverlay() {
               style={{ minHeight: 180, border: '1px solid rgba(255,255,255,0.06)' }}
             >
               <VideoTile
-                stream={remoteStreams[userId] ?? null}
+                videoStream={remoteMedia[userId]?.camera ?? null}
+                audioStream={remoteMedia[userId]?.mic ?? null}
                 userName={players[userId]?.name ?? 'Unknown'}
                 userId={userId}
                 isMuted={!(peerMediaStates[userId]?.isMicOn ?? true)}
-                isCameraOn={false}
+                isCameraOn={!!(peerMediaStates[userId]?.isCameraOn)}
                 size="full"
                 shape="rect"
               />
@@ -167,12 +244,12 @@ export function MeetingOverlay() {
       {localStream && (
         <div title="You" className="animate-scaleIn">
           <VideoTile
-            stream={localStream}
+            videoStream={localStream}
             userName={localUser?.name ?? 'You'}
             userId={localPlayerId ?? ''}
             isLocal={true}
             isMuted={!isMicOn}
-            isCameraOn={false}
+            isCameraOn={isCameraOn}
             size="sm"
             shape="circle"
           />
@@ -186,11 +263,12 @@ export function MeetingOverlay() {
           className="animate-scaleIn"
         >
           <VideoTile
-            stream={remoteStreams[userId] ?? null}
+            videoStream={remoteMedia[userId]?.camera ?? null}
+            audioStream={remoteMedia[userId]?.mic ?? null}
             userName={players[userId]?.name ?? 'Unknown'}
             userId={userId}
             isMuted={!(peerMediaStates[userId]?.isMicOn ?? true)}
-            isCameraOn={false}
+            isCameraOn={!!(peerMediaStates[userId]?.isCameraOn)}
             size="sm"
             shape="circle"
           />
