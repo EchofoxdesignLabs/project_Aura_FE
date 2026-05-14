@@ -1,8 +1,8 @@
 import { sfuManager } from '@core/services/sfu/sfu.manager';
 import { useGameStore } from '@core/store/game.store';
 
-const PROXIMITY_RADIUS = 300;
-const FULL_VOLUME_RADIUS = 50;
+const PROXIMITY_RADIUS = 6; // tiles
+const FULL_VOLUME_RADIUS = 1.5; // tiles
 const CHECK_INTERVAL = 500;
 
 export class ProximitySystem {
@@ -48,6 +48,7 @@ export class ProximitySystem {
       const distance = Math.sqrt(dx * dx + dy * dy);
 
       if (distance > PROXIMITY_RADIUS) {
+        sfuManager.setAudioVolume(userId, 0);
         continue;
       }
 

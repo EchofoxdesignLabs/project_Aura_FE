@@ -193,6 +193,13 @@ export const useMediaStore = create<MediaState>()((set, get) => ({
           })
           .catch((err) => {
             console.error('[mediaStore] Failed to acquire camera:', err);
+            if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+              alert('No camera found. Please connect a webcam or check your system settings.');
+            } else if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+              alert('Camera access denied. Please allow camera permissions in your browser settings.');
+            } else {
+              alert('Could not start camera. It may be in use by another application.');
+            }
           });
       }
     });

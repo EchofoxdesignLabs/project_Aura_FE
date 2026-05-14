@@ -1,6 +1,7 @@
 import { socketService } from '@core/services/socket.service';
 import { useGameStore } from '@core/store/game.store';
 import { useMediaStore } from '@core/store/media.store';
+import type { DeskGoToMineResponse, ZoneSnapshot } from '@core/types';
 
 export class NetworkManager {
   private lastEmitTime = 0;
@@ -22,6 +23,12 @@ export class NetworkManager {
 
     socketService.on('player:moved', ({ userId, x, y }) => {
       useGameStore.getState().updatePlayerPosition(userId, x, y);
+    });
+
+    socketService.on('desk:updated', (zone) => {
+      useGameStore
+        .getState()
+        .updateDeskAssignment(zone.id, zone.assignedUserId, zone.assignedUserName);
     });
 
     // Zone Events
@@ -85,11 +92,46 @@ export class NetworkManager {
     socketService.emit('player:move', { x, y });
   }
 
+  public async assignDesk(zoneId: string, userId?: string): Promise<ZoneSnapshot> {
+    const zone = await socketService.request('desk:assign', {
+      zoneId,
+      ...(userId ? { userId } : {}),
+    });
+    useGameStore.getState().updateDeskAssignment(
+      zone.id,
+      zone.assignedUserId,
+      zone.assignedUserName,
+    );
+    return zone;
+  }
+
+  public async unassignDesk(zoneId: string): Promise<ZoneSnapshot> {
+    const zone = await socketService.request('desk:unassign', { zoneId });
+    useGameStore.getState().updateDeskAssignment(
+      zone.id,
+      zone.assignedUserId,
+      zone.assignedUserName,
+    );
+    return zone;
+  }
+
+  public async goToMyDesk(): Promise<DeskGoToMineResponse> {
+    const response = await socketService.request('desk:go-to-mine', {});
+    useGameStore.getState().updateDeskAssignment(
+      response.zone.id,
+      response.zone.assignedUserId,
+      response.zone.assignedUserName,
+    );
+    useGameStore.getState().setNavigationTarget(response.target);
+    return response;
+  }
+
   public destroy(): void {
     // Player Events
     socketService.off('player:joined');
     socketService.off('player:left');
     socketService.off('player:moved');
+    socketService.off('desk:updated');
     
     // Zone Events
     socketService.off('zone:entered');
@@ -104,5 +146,6 @@ export class NetworkManager {
     // Screen Share Events
     socketService.off('screenshare:start');
     socketService.off('screenshare:stop');
+    socketService.off('media:state');
   }
 }

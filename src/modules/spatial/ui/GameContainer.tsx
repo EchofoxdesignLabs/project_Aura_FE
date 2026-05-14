@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import Phaser from 'phaser';
 import { useGameStore } from '@core/store/game.store';
 import { useMediaStore } from '@core/store/media.store';
+import { socketService } from '@core/services/socket.service';
 import { sfuManager } from '@core/services/sfu/sfu.manager';
+import type { OfficeStatePayload } from '@core/types';
 import { OfficeScene } from '../scenes/OfficeScene';
 import { HUD } from './HUD';
 import { ProximityIndicator } from './ProximityIndicator';
@@ -15,6 +17,7 @@ export function GameContainer() {
   const gameRef = useRef<Phaser.Game | null>(null);
   
   const currentOfficeId = useGameStore((state) => state.currentOfficeId);
+  const setConnectionStatus = useGameStore((state) => state.setConnectionStatus);
   const initMedia = useMediaStore((state) => state.initMedia);
   const stopMedia = useMediaStore((state) => state.stopMedia);
   
@@ -25,30 +28,128 @@ export function GameContainer() {
       return;
     }
     let isMounted = true;
+    let clearPendingOfficeStateListener: (() => void) | null = null;
 
-    // Initialize SFU connection FIRST, then request media.
-    // This ensures even users without mics (or who deny access) can hear others.
-    sfuManager.initialize()
-      .then(() => initMedia())
+    const clearPendingOfficeState = () => {
+      if (!clearPendingOfficeStateListener) {
+        return;
+      }
+
+      clearPendingOfficeStateListener();
+      clearPendingOfficeStateListener = null;
+    };
+
+    const resyncOfficeState = () => {
+      const officeId = useGameStore.getState().currentOfficeId;
+      if (!officeId || !socketService.isConnected()) {
+        return;
+      }
+
+      clearPendingOfficeState();
+      useGameStore.getState().setConnectionStatus('reconnecting');
+
+      const timeout = window.setTimeout(() => {
+        socketService.off('office:state', handleOfficeState);
+        clearPendingOfficeStateListener = null;
+      }, 10000);
+
+      const handleOfficeState = (state: OfficeStatePayload) => {
+        window.clearTimeout(timeout);
+        socketService.off('office:state', handleOfficeState);
+        clearPendingOfficeStateListener = null;
+
+        const gameStore = useGameStore.getState();
+        gameStore.setOffice(state.office, state.zones);
+        gameStore.setAllPlayers(state.players);
+        gameStore.setConnectionStatus('connected');
+      };
+
+      clearPendingOfficeStateListener = () => {
+        window.clearTimeout(timeout);
+        try {
+          socketService.off('office:state', handleOfficeState);
+        } catch {
+          // Socket may already be fully torn down during app logout.
+        }
+      };
+
+      socketService.on('office:state', handleOfficeState);
+      socketService.emit('office:join', { officeId });
+    };
+
+    const heartbeatId = window.setInterval(() => {
+      if (!socketService.isConnected()) {
+        return;
+      }
+
+      try {
+        socketService.emit('presence:heartbeat');
+      } catch (error) {
+        console.warn('[GameContainer] Presence heartbeat failed:', error);
+      }
+    }, 15000);
+
+    setConnectionStatus(socketService.isConnected() ? 'connected' : 'reconnecting');
+
+    const stopConnectListener = socketService.onConnect(() => {
+      if (!isMounted) {
+        return;
+      }
+
+      resyncOfficeState();
+    });
+
+    const stopDisconnectListener = socketService.onDisconnect((reason) => {
+      if (!isMounted) {
+        return;
+      }
+
+      useGameStore
+        .getState()
+        .setConnectionStatus(reason === 'io client disconnect' ? 'disconnected' : 'reconnecting');
+    });
+
+    const stopErrorListener = socketService.onError(() => {
+      if (!isMounted) {
+        return;
+      }
+
+      useGameStore.getState().setConnectionStatus('reconnecting');
+    });
+
+    // Initialize media hardware and SFU in parallel.
+    // Media MUST initialize even if SFU fails — so users can at least toggle their camera/mic.
+    // SFU producers are started only after BOTH succeed.
+    const mediaReady = initMedia().catch((err) => {
+      console.warn('[GameContainer] Media access denied. Camera/mic won\'t be available:', err);
+    });
+
+    const sfuReady = sfuManager.initialize().catch((err) => {
+      console.warn('[GameContainer] SFU setup failed. Voice/video won\'t relay to others:', err);
+    });
+
+    Promise.all([mediaReady, sfuReady])
       .then(async () => {
         if (!isMounted) return;
         const stream = useMediaStore.getState().localStream;
+        const sfuOk = sfuManager['device']?.loaded;
+        if (!sfuOk || !stream) return;
 
         // Start mic producer if audio track available
-        const audioTrack = stream?.getAudioTracks()[0];
+        const audioTrack = stream.getAudioTracks()[0];
         if (audioTrack && audioTrack.readyState !== 'ended') {
           await sfuManager.startMicProducer(audioTrack);
         }
 
         // Start camera producer if video track available
-        const videoTrack = stream?.getVideoTracks()[0];
+        const videoTrack = stream.getVideoTracks()[0];
         if (videoTrack && videoTrack.readyState !== 'ended') {
           await sfuManager.startCameraProducer(videoTrack);
         }
       })
       .catch((error) => {
         if (!isMounted) return;
-        console.warn('[GameContainer] Media access denied or SFU setup failed. Office will load without voice.', error);
+        console.warn('[GameContainer] Producer setup failed:', error);
       })
       .finally(() => {
         if (!isMounted) return;
@@ -90,6 +191,11 @@ export function GameContainer() {
     return () => {
       console.log('[GameContainer] Destroying Phaser instance...');
       isMounted = false;
+      window.clearInterval(heartbeatId);
+      clearPendingOfficeState();
+      stopConnectListener();
+      stopDisconnectListener();
+      stopErrorListener();
       window.removeEventListener('resize', handleResize);
       
       // Cleanup: Disconnect all peers and stop hardware tracks
@@ -103,7 +209,7 @@ export function GameContainer() {
         gameRef.current = null;
       }
     };
-  }, [currentOfficeId, initMedia, stopMedia]);
+  }, [currentOfficeId, initMedia, setConnectionStatus, stopMedia]);
 
   // NOTE: Phaser keyboard input is NEVER disabled.
   // Users must be able to walk freely inside meeting zones (like Gather).

@@ -4,6 +4,7 @@ import { UserPill } from './components/UserPill';
 import { PresenceCounter } from './components/PresenceCounter';
 import { MediaToolbar } from './components/MediaToolbar';
 import { Minimap } from './components/Minimap';
+import { DeskPanel } from './components/DeskPanel';
 
 export function HUD() {
   useEffect(() => {
@@ -18,16 +19,17 @@ export function HUD() {
         <UserPill />
       </div>
 
-      {/* Bottom Row: Presence, Media, and Minimap */}
+      {/* Bottom Row: Presence, Media, Minimap, and Desk Panel */}
       <div className="flex w-full items-end justify-between">
-        <div className="flex flex-1 justify-start">
+        <div className="flex flex-col gap-2 flex-1 justify-start">
+          <DeskPanel />
           <PresenceCounter />
         </div>
-        
+
         <div className="flex flex-1 justify-center">
           <MediaToolbar />
         </div>
-        
+
         <div className="flex flex-1 justify-end">
           <Minimap />
         </div>

@@ -3,7 +3,9 @@ import { useMemo, useState } from 'react';
 import { useAuthStore } from '@core/store/auth.store';
 import { Button } from '@core/ui/Button';
 import { Input } from '@core/ui/Input';
-import type { RegisterCompanyRequest } from '@core/types';
+import type { AvatarConfig, RegisterCompanyRequest } from '@core/types';
+import { AvatarPicker } from '@spatial/ui/components/AvatarPicker';
+import { buildDefaultAvatarConfig } from '@spatial/utils/avatar-presets';
 
 interface RegisterFormProps {
   onSwitchToLogin: () => void;
@@ -28,6 +30,7 @@ export function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
   const clearError = useAuthStore((state) => state.clearError);
 
   const [formState, setFormState] = useState<RegisterCompanyRequest>(createEmptyRegistrationState);
+  const [avatarConfig, setAvatarConfig] = useState<AvatarConfig>(buildDefaultAvatarConfig);
   const [clientError, setClientError] = useState<string | null>(null);
 
   const isDisabled = useMemo(
@@ -82,6 +85,7 @@ export function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
       adminEmail: formState.adminEmail.trim(),
       adminPassword: formState.adminPassword,
       adminName: formState.adminName.trim(),
+      avatarConfig,
     });
   }
 
@@ -147,6 +151,14 @@ export function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
         disabled={isLoading}
         hint="Creating a workspace also creates the first ORG_ADMIN account."
       />
+
+      {/* Avatar Picker */}
+      <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+        <label className="mb-3 block text-xs font-medium uppercase tracking-wider text-slate-400">
+          Choose Your Avatar
+        </label>
+        <AvatarPicker value={avatarConfig} onChange={setAvatarConfig} compact />
+      </div>
 
       <div className="space-y-3 pt-2">
         <Button type="submit" className="w-full" size="lg" isLoading={isLoading} disabled={isDisabled}>

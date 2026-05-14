@@ -1,9 +1,16 @@
+export interface AvatarConfig {
+  version: 1;
+  presetId: string;
+  paletteId: string;
+}
+
 export interface RegisterCompanyRequest {
   companyName: string;
   companyDomain: string;
   adminEmail: string;
   adminPassword: string;
   adminName: string;
+  avatarConfig?: AvatarConfig;
 }
 
 export interface RegisterCompanyResponse {
@@ -21,7 +28,21 @@ export interface AuthUser {
   name: string;
   role: string;
   company: string;
+  avatarConfig: AvatarConfig;
 }
+
+export interface CompanyUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  companyId: string;
+  company: string;
+  avatarConfig: AvatarConfig;
+  lastOfficeId?: string | null;
+}
+
+export type UpdateAvatarRequest = AvatarConfig;
 
 export interface LoginResponse {
   access_token: string;
@@ -57,10 +78,18 @@ export interface InviteDetails {
 export interface AcceptInviteRequest {
   name: string;
   password: string;
+  avatarConfig?: AvatarConfig;
 }
 
+export interface OfficeLayoutMetadata {
+  layoutMode: string;
+  gridWidth: number;
+  gridHeight: number;
+  tileWidth: number;
+  tileHeight: number;
+}
 
-export interface Office {
+export interface Office extends OfficeLayoutMetadata {
   id: string;
   name: string;
   width: number;
@@ -82,6 +111,10 @@ export interface ZoneSnapshot {
   y: number;
   width: number;
   height: number;
+  anchorX: number | null;
+  anchorY: number | null;
+  assignedUserId: string | null;
+  assignedUserName: string | null;
 }
 
 export interface OfficeWithZones extends Office {
@@ -92,6 +125,7 @@ export interface PlayerState {
   socketId: string;
   userId: string;
   name: string;
+  avatarConfig: AvatarConfig;
   x: number;
   y: number;
   currentZoneId: string | null;
@@ -108,9 +142,12 @@ export interface PlayerMovePayload {
   y: number;
 }
 
+export interface OfficeStateOffice extends Office {}
+
 export interface OfficeStatePayload {
   players: PlayerState[];
   zones: ZoneSnapshot[];
+  office: OfficeStateOffice;
 }
 
 export interface PlayerLeftPayload {
@@ -158,6 +195,25 @@ export interface MediaStatePayload {
     isCameraOn?: boolean;
   };
 }
+
+export interface DeskAssignPayload {
+  zoneId: string;
+  userId?: string;
+}
+
+export interface DeskUnassignPayload {
+  zoneId: string;
+}
+
+export interface DeskGoToMineResponse {
+  zone: ZoneSnapshot;
+  target: {
+    x: number;
+    y: number;
+  };
+}
+
+export type DeskUpdatedPayload = ZoneSnapshot;
 
 export type SfuMediaTag = 'mic' | 'camera' | 'screen';
 
@@ -279,11 +335,24 @@ export interface SocketRequestEvents {
     payload: SfuResumeProducerRequest;
     response: { resumed: true };
   };
+  'desk:assign': {
+    payload: DeskAssignPayload;
+    response: ZoneSnapshot;
+  };
+  'desk:unassign': {
+    payload: DeskUnassignPayload;
+    response: ZoneSnapshot;
+  };
+  'desk:go-to-mine': {
+    payload: Record<string, never>;
+    response: DeskGoToMineResponse;
+  };
 }
 
 export interface SocketClientToServerEvents {
   'office:join': (payload: OfficeJoinPayload) => void;
   'player:move': (payload: PlayerMovePayload) => void;
+  'presence:heartbeat': () => void;
   'screenshare:start': (payload: Record<string, never>) => void;
   'screenshare:stop': (payload: Record<string, never>) => void;
   'media:state': (payload: { isMicOn?: boolean; isCameraOn?: boolean }) => void;
@@ -306,4 +375,5 @@ export interface SocketServerToClientEvents {
   'screenshare:start': (payload: ScreenSharePayload) => void;
   'screenshare:stop': (payload: ScreenSharePayload) => void;
   'media:state': (payload: MediaStatePayload) => void;
+  'desk:updated': (payload: DeskUpdatedPayload) => void;
 }

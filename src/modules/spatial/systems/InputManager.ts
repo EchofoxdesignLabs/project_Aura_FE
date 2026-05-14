@@ -1,5 +1,16 @@
 import Phaser from 'phaser';
 
+/**
+ * InputManager — processes WASD / arrow key input.
+ *
+ * Movement is emitted as **screen-space velocity** (pixels/second).
+ * The OfficeScene converts the resulting screen position back to
+ * grid coordinates before emitting `player:move` to the server.
+ *
+ * In isometric view, pressing "up" moves the player visually upward
+ * on screen, which corresponds to moving diagonally on the grid.
+ * This feels natural and matches SoWork-style controls.
+ */
 export class InputManager {
   private cursors: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasdKeys: {
@@ -8,7 +19,7 @@ export class InputManager {
     S: Phaser.Input.Keyboard.Key;
     D: Phaser.Input.Keyboard.Key;
   };
-  
+
   // Fixed movement speed in pixels per second
   private readonly speed = 200;
 
@@ -17,10 +28,8 @@ export class InputManager {
       throw new Error('Keyboard plugin is not enabled in this scene.');
     }
 
-    // Initialize arrow keys
     this.cursors = scene.input.keyboard.createCursorKeys();
 
-    // Initialize WASD keys
     this.wasdKeys = scene.input.keyboard.addKeys({
       W: Phaser.Input.Keyboard.KeyCodes.W,
       A: Phaser.Input.Keyboard.KeyCodes.A,
@@ -61,7 +70,7 @@ export class InputManager {
   }
 
   public destroy(): void {
-    // Phaser handles basic input cleanup when the scene is destroyed, 
+    // Phaser handles basic input cleanup when the scene is destroyed,
     // but this method is exposed for any future explicit teardown needs.
   }
 }

@@ -61,11 +61,18 @@ export function VideoTile({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    video.srcObject = videoStream;
+    
+    // Explicitly re-set srcObject if stream exists and video should be shown
+    if (videoStream && (isCameraOn || isScreenShare)) {
+      video.srcObject = videoStream;
+    } else {
+      video.srcObject = null;
+    }
+    
     return () => {
       video.srcObject = null;
     };
-  }, [videoStream]);
+  }, [videoStream, isCameraOn, isScreenShare]);
 
   // ─── Speaking detection (non-local, non-muted only) ───
   // Use audioStream (separate mic stream) for analysis; fall back to videoStream

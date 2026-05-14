@@ -1,5 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { useGameStore } from '@core/store/game.store';
+import {
+  buildIsoLayout,
+  getIsoCanvasSize,
+  zoneDiamond,
+  gridToScreen,
+} from '../../utils/isometric';
 
 export function Minimap() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -17,7 +23,6 @@ export function Minimap() {
       const state = useGameStore.getState();
       const { officeData, zones, players, localPlayerId } = state;
 
-      // Clear the canvas for the next frame
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       if (!officeData) {
@@ -25,69 +30,83 @@ export function Minimap() {
         return;
       }
 
-      // Calculate uniform scale to fit the office into the canvas
-      const padding = 10;
+      const layout = buildIsoLayout(officeData);
+      const canvasSize = getIsoCanvasSize(officeData);
+
+      // Calculate uniform scale to fit the iso canvas into the minimap
+      const padding = 8;
       const usableWidth = canvas.width - padding * 2;
       const usableHeight = canvas.height - padding * 2;
-      const scaleX = usableWidth / officeData.width;
-      const scaleY = usableHeight / officeData.height;
+      const scaleX = usableWidth / canvasSize.width;
+      const scaleY = usableHeight / canvasSize.height;
       const scale = Math.min(scaleX, scaleY);
 
-      // Center offset
-      const offsetX = (canvas.width - officeData.width * scale) / 2;
-      const offsetY = (canvas.height - officeData.height * scale) / 2;
+      const offsetX = (canvas.width - canvasSize.width * scale) / 2;
+      const offsetY = (canvas.height - canvasSize.height * scale) / 2;
 
-      // 1. Draw Office Bounds
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(
-        offsetX,
-        offsetY,
-        officeData.width * scale,
-        officeData.height * scale
-      );
-
-      // 2. Draw Zones
-      zones.forEach((zone) => {
-        if (zone.width > 0 && zone.height > 0) {
-          ctx.fillStyle = 'rgba(56, 189, 248, 0.1)'; // soft cyan
-          ctx.fillRect(
-            offsetX + zone.x * scale,
-            offsetY + zone.y * scale,
-            zone.width * scale,
-            zone.height * scale
-          );
-          ctx.strokeStyle = 'rgba(56, 189, 248, 0.3)';
-          ctx.lineWidth = 1;
-          ctx.strokeRect(
-            offsetX + zone.x * scale,
-            offsetY + zone.y * scale,
-            zone.width * scale,
-            zone.height * scale
-          );
-        }
+      // Helper to transform world point to minimap point
+      const toMini = (sx: number, sy: number) => ({
+        mx: offsetX + sx * scale,
+        my: offsetY + sy * scale,
       });
 
-      // 3. Draw Players
-      Object.values(players).forEach((player) => {
-        const isLocal = player.userId === localPlayerId;
-        const x = offsetX + player.x * scale;
-        const y = offsetY + player.y * scale;
+      // 1. Draw zone diamonds
+      zones.forEach((zone) => {
+        const polygon = zoneDiamond(zone, layout);
 
         ctx.beginPath();
-        ctx.arc(x, y, isLocal ? 4 : 3, 0, Math.PI * 2);
-        
+        const first = toMini(polygon[0].sx, polygon[0].sy);
+        ctx.moveTo(first.mx, first.my);
+        for (let i = 1; i < polygon.length; i++) {
+          const pt = toMini(polygon[i].sx, polygon[i].sy);
+          ctx.lineTo(pt.mx, pt.my);
+        }
+        ctx.closePath();
+
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.08)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.25)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      });
+
+      // 2. Draw players
+      Object.values(players).forEach((player) => {
+        const isLocal = player.userId === localPlayerId;
+
+        // Player positions in store are screen-space for local, grid-space for remote
+        // After F10 changes, store positions are screen-space for local.
+        // For minimap, we need to handle both: local uses screen position, remote uses grid→screen
+        let sx: number;
+        let sy: number;
+
         if (isLocal) {
-          ctx.fillStyle = '#22d3ee'; // cyan-400 for local player
+          // Local player position is already screen-space in the store
+          sx = player.x;
+          sy = player.y;
+        } else {
+          // Remote player positions are grid-space from the server
+          const sp = gridToScreen(player.x, player.y, layout);
+          sx = sp.sx;
+          sy = sp.sy;
+        }
+
+        const { mx, my } = toMini(sx, sy);
+
+        ctx.beginPath();
+        ctx.arc(mx, my, isLocal ? 4 : 3, 0, Math.PI * 2);
+
+        if (isLocal) {
+          ctx.fillStyle = '#22d3ee';
           ctx.shadowColor = '#22d3ee';
           ctx.shadowBlur = 6;
         } else {
-          ctx.fillStyle = '#94a3b8'; // slate-400 for remote players
+          ctx.fillStyle = '#94a3b8';
           ctx.shadowBlur = 0;
         }
-        
+
         ctx.fill();
-        ctx.shadowBlur = 0; // reset shadow for next draws
+        ctx.shadowBlur = 0;
       });
 
       animationFrameId = requestAnimationFrame(renderMap);
@@ -102,12 +121,7 @@ export function Minimap() {
 
   return (
     <div className="pointer-events-auto overflow-hidden rounded-xl border border-white/10 bg-slate-900/80 shadow-lg backdrop-blur-md">
-      <canvas
-        ref={canvasRef}
-        width={200}
-        height={150}
-        className="block"
-      />
+      <canvas ref={canvasRef} width={200} height={150} className="block" />
     </div>
   );
 }

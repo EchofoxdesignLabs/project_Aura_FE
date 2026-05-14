@@ -1,13 +1,15 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 
-import type { PlayerState, ZoneSnapshot, ZoneType } from '@core/types';
+import type {
+  AvatarConfig,
+  OfficeStateOffice,
+  PlayerState,
+  ZoneSnapshot,
+  ZoneType,
+} from '@core/types';
 
-export interface OfficeMetadata {
-  width: number;
-  height: number;
-  name: string;
-}
+export type OfficeMetadata = OfficeStateOffice;
 
 export interface CurrentZone {
   id: string;
@@ -21,6 +23,10 @@ interface GameStoreData {
   zones: ZoneSnapshot[];
   players: Record<string, PlayerState>;
   localPlayerId: string | null;
+  selectedDeskZoneId: string | null;
+  hoveredDeskZoneId: string | null;
+  navigationTarget: { x: number; y: number } | null;
+  connectionStatus: 'connected' | 'reconnecting' | 'disconnected';
   currentZone: CurrentZone | null;
   inMeeting: boolean;
   meetingZoneId: string | null;
@@ -28,12 +34,22 @@ interface GameStoreData {
 }
 
 export interface GameState extends GameStoreData {
-  setOffice: (id: string, data: OfficeMetadata, zones: ZoneSnapshot[]) => void;
+  setOffice: (office: OfficeMetadata, zones: ZoneSnapshot[]) => void;
   setLocalPlayerId: (id: string | null) => void;
   addPlayer: (player: PlayerState) => void;
   removePlayer: (userId: string) => void;
   updatePlayerPosition: (userId: string, x: number, y: number) => void;
+  updatePlayerAvatar: (userId: string, avatarConfig: AvatarConfig) => void;
   setAllPlayers: (players: PlayerState[]) => void;
+  setSelectedDeskZoneId: (zoneId: string | null) => void;
+  setHoveredDeskZoneId: (zoneId: string | null) => void;
+  updateDeskAssignment: (
+    zoneId: string,
+    assignedUserId: string | null,
+    assignedUserName: string | null,
+  ) => void;
+  setNavigationTarget: (target: { x: number; y: number } | null) => void;
+  setConnectionStatus: (status: GameStoreData['connectionStatus']) => void;
   setCurrentZone: (zone: CurrentZone | null) => void;
   enterMeeting: (zoneId: string, participants: string[]) => void;
   addMeetingParticipant: (userId: string) => void;
@@ -49,6 +65,10 @@ function createInitialGameData(): GameStoreData {
     zones: [],
     players: {},
     localPlayerId: null,
+    selectedDeskZoneId: null,
+    hoveredDeskZoneId: null,
+    navigationTarget: null,
+    connectionStatus: 'disconnected',
     currentZone: null,
     inMeeting: false,
     meetingZoneId: null,
@@ -70,13 +90,14 @@ function dedupeParticipants(participants: string[]): string[] {
 export const useGameStore = create<GameState>()(
   subscribeWithSelector((set) => ({
     ...createInitialGameData(),
-    setOffice: (id, data, zones) =>
+    setOffice: (office, zones) =>
       set((state) => ({
         ...createInitialGameData(),
-        currentOfficeId: id,
-        officeData: { ...data },
+        currentOfficeId: office.id,
+        officeData: { ...office },
         zones: [...zones],
         localPlayerId: state.localPlayerId,
+        connectionStatus: 'connected',
       })),
     setLocalPlayerId: (id) => set(() => ({ localPlayerId: id })),
     addPlayer: (player) =>
@@ -119,10 +140,46 @@ export const useGameStore = create<GameState>()(
           },
         };
       }),
+    updatePlayerAvatar: (userId, avatarConfig) =>
+      set((state) => {
+        const existingPlayer = state.players[userId];
+        if (!existingPlayer) {
+          return {};
+        }
+
+        return {
+          players: {
+            ...state.players,
+            [userId]: {
+              ...existingPlayer,
+              avatarConfig,
+            },
+          },
+        };
+      }),
     setAllPlayers: (players) =>
       set(() => ({
         players: mapPlayers(players),
       })),
+    setSelectedDeskZoneId: (zoneId) => set(() => ({ selectedDeskZoneId: zoneId })),
+    setHoveredDeskZoneId: (zoneId) => set(() => ({ hoveredDeskZoneId: zoneId })),
+    updateDeskAssignment: (zoneId, assignedUserId, assignedUserName) =>
+      set((state) => ({
+        zones: state.zones.map((zone) =>
+          zone.id === zoneId
+            ? {
+                ...zone,
+                assignedUserId,
+                assignedUserName,
+              }
+            : zone,
+        ),
+      })),
+    setNavigationTarget: (target) =>
+      set(() => ({
+        navigationTarget: target ? { ...target } : null,
+      })),
+    setConnectionStatus: (status) => set(() => ({ connectionStatus: status })),
     setCurrentZone: (zone) =>
       set(() => ({
         currentZone: zone ? { ...zone } : null,

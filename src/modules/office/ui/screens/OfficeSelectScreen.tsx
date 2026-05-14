@@ -65,6 +65,23 @@ export function OfficeSelectScreen() {
     }
   }
 
+  async function handleReseedOffice() {
+    if (!window.confirm('This will DELETE all existing offices and create a fresh one with the correct isometric layout. Continue?')) {
+      return;
+    }
+    try {
+      setIsSeeding(true);
+      setError(null);
+      await apiClient.post('/office/reseed', {});
+      await fetchOffices();
+    } catch (reseedError) {
+      console.error('Failed to reseed office:', reseedError);
+      setError('Unable to reset the office layout. Please verify the backend office service.');
+    } finally {
+      setIsSeeding(false);
+    }
+  }
+
   async function handleEnterOffice(officeId: string) {
     if (!token || !user) {
       setError('Your session is missing. Please sign in again.');
@@ -93,15 +110,7 @@ export function OfficeSelectScreen() {
           window.clearTimeout(timeout);
           socketService.off('office:state', onceHandler);
           setLocalPlayerId(user.id);
-          setOffice(
-            targetOffice.id,
-            {
-              width: targetOffice.width,
-              height: targetOffice.height,
-              name: targetOffice.name,
-            },
-            state.zones,
-          );
+          setOffice(state.office, state.zones);
           setAllPlayers(state.players);
           resolve();
         };
@@ -177,9 +186,21 @@ export function OfficeSelectScreen() {
                 </Button>
               )}
               {user?.role === 'ORG_ADMIN' ? (
-                <Button variant="outline" onClick={() => setInviteOpen(true)}>
-                  + Invite Member
-                </Button>
+                <>
+                  <Button variant="outline" onClick={() => setInviteOpen(true)}>
+                    + Invite Member
+                  </Button>
+                  {offices.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      className="text-amber-400 hover:text-amber-300"
+                      onClick={handleReseedOffice}
+                      disabled={isSeeding}
+                    >
+                      {isSeeding ? 'Resetting...' : '⟳ Reset Office Layout'}
+                    </Button>
+                  )}
+                </>
               ) : null}
               <Button onClick={logout} variant="ghost" className="text-slate-300">
                 Sign Out

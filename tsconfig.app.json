@@ -22,7 +22,19 @@
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noUncheckedSideEffectImports": true,
+
+    /* PATH ALIASES */
+    "baseUrl": "./",
+    "paths": {
+      "@app/*": ["src/app/*"],
+      "@core/*": ["src/core/*"],
+      "@spatial/*": ["src/modules/spatial/*"],
+      "@enterprise/*": ["src/modules/enterprise/*"],
+      "@productivity/*": ["src/modules/productivity/*"],
+      "@intelligence/*": ["src/modules/intelligence/*"],
+      "@assets/*": ["src/assets/*"]
+    }
   },
   "include": ["src"]
 }

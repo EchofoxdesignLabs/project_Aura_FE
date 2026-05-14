@@ -2,7 +2,10 @@ import { create } from 'zustand';
 
 import { ApiError, apiClient } from '@core/api/api.client';
 import type {
+  AvatarConfig,
   AuthUser,
+  CompanyUser,
+  UpdateAvatarRequest,
   LoginRequest,
   LoginResponse,
   RegisterCompanyRequest,
@@ -15,6 +18,12 @@ import { useMediaStore } from '@core/store/media.store';
 
 const TOKEN_STORAGE_KEY = 'aura_token';
 const USER_STORAGE_KEY = 'aura_user';
+
+const DEFAULT_AVATAR_CONFIG: AvatarConfig = {
+  version: 1,
+  presetId: 'aura-01',
+  paletteId: 'ocean',
+};
 
 export const AUTH_STORAGE_KEYS = {
   token: TOKEN_STORAGE_KEY,
@@ -32,7 +41,13 @@ export interface AuthState {
   login: (email: string, password: string) => Promise<void>;
   registerCompany: (payload: RegisterCompanyRequest) => Promise<void>;
   createInvite: (email: string, roleName: 'EMPLOYEE' | 'ORG_ADMIN') => Promise<CreateInviteResponse>;
-  acceptInvite: (token: string, name: string, password: string) => Promise<void>;
+  acceptInvite: (
+    token: string,
+    name: string,
+    password: string,
+    avatarConfig?: AvatarConfig,
+  ) => Promise<void>;
+  updateAvatar: (avatarConfig: AvatarConfig) => Promise<void>;
   logout: () => void;
   hydrate: () => void;
   clearError: () => void;
@@ -50,6 +65,36 @@ function isAuthUser(value: unknown): value is AuthUser {
     typeof value.role === 'string' &&
     typeof value.company === 'string'
   );
+}
+
+function isAvatarConfig(value: unknown): value is AvatarConfig {
+  return (
+    isRecord(value) &&
+    value.version === 1 &&
+    typeof value.presetId === 'string' &&
+    typeof value.paletteId === 'string'
+  );
+}
+
+function normalizeAvatarConfig(value: unknown): AvatarConfig {
+  return isAvatarConfig(value) ? value : DEFAULT_AVATAR_CONFIG;
+}
+
+function normalizeAuthUser(user: AuthUser): AuthUser {
+  return {
+    ...user,
+    avatarConfig: normalizeAvatarConfig(user.avatarConfig),
+  };
+}
+
+function mapCompanyUserToAuthUser(user: CompanyUser, fallback: AuthUser): AuthUser {
+  return {
+    id: user.id,
+    name: user.name,
+    role: user.role ?? fallback.role,
+    company: user.company ?? fallback.company,
+    avatarConfig: normalizeAvatarConfig(user.avatarConfig),
+  };
 }
 
 function getStorage(): Storage | null {
@@ -100,12 +145,14 @@ function setAuthenticatedSession(
   set: (partial: Partial<AuthState>) => void,
   response: LoginResponse,
 ): void {
+  const user = normalizeAuthUser(response.user);
+
   apiClient.setToken(response.access_token);
-  persistAuth(response.access_token, response.user);
+  persistAuth(response.access_token, user);
 
   set({
     token: response.access_token,
-    user: response.user,
+    user,
     isAuthenticated: true,
     isLoading: false,
     error: null,
@@ -203,16 +250,49 @@ export const useAuthStore = create<AuthState>()((set) => ({
       throw new Error(msg);
     }
   },
-  acceptInvite: async (token, name, password) => {
+  acceptInvite: async (token, name, password, avatarConfig) => {
     set({ isLoading: true, error: null });
     try {
-      const response = await apiClient.post<LoginResponse>(`/auth/invites/${token}/accept`, { name, password });
+      const response = await apiClient.post<LoginResponse>(`/auth/invites/${token}/accept`, {
+        name,
+        password,
+        ...(avatarConfig ? { avatarConfig } : {}),
+      });
       setAuthenticatedSession(set, response);
     } catch (error) {
       clearPersistedAuth();
       apiClient.setToken(null);
       resetAuthState(set);
       set({ error: normalizeErrorMessage(error) });
+    }
+  },
+  updateAvatar: async (avatarConfig) => {
+    set({ isLoading: true, error: null });
+
+    try {
+      const requestBody: UpdateAvatarRequest = avatarConfig;
+      const response = await apiClient.patch<CompanyUser>('/users/me/avatar', requestBody);
+
+      set((state) => {
+        if (!state.user || !state.token) {
+          return { isLoading: false };
+        }
+
+        const nextUser = mapCompanyUserToAuthUser(response, state.user);
+        persistAuth(state.token, nextUser);
+        useGameStore.getState().updatePlayerAvatar(nextUser.id, nextUser.avatarConfig);
+
+        return {
+          user: nextUser,
+          isLoading: false,
+          error: null,
+        };
+      });
+    } catch (error) {
+      set({
+        isLoading: false,
+        error: normalizeErrorMessage(error),
+      });
     }
   },
   logout: () => {
@@ -252,9 +332,11 @@ export const useAuthStore = create<AuthState>()((set) => ({
       }
 
       apiClient.setToken(token);
+      const normalizedUser = normalizeAuthUser(parsedUser);
+
       set({
         token,
-        user: parsedUser,
+        user: normalizedUser,
         isAuthenticated: true,
         isLoading: false,
         error: null,
