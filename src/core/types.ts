@@ -356,6 +356,7 @@ export interface SocketClientToServerEvents {
   'screenshare:start': (payload: Record<string, never>) => void;
   'screenshare:stop': (payload: Record<string, never>) => void;
   'media:state': (payload: { isMicOn?: boolean; isCameraOn?: boolean }) => void;
+  'player:update-avatar': (payload: { avatarConfig: AvatarConfig }) => void;
 }
 
 export interface SocketServerToClientEvents {
@@ -376,4 +377,5 @@ export interface SocketServerToClientEvents {
   'screenshare:stop': (payload: ScreenSharePayload) => void;
   'media:state': (payload: MediaStatePayload) => void;
   'desk:updated': (payload: DeskUpdatedPayload) => void;
+  'player:avatar-updated': (payload: { userId: string; avatarConfig: AvatarConfig }) => void;
 }

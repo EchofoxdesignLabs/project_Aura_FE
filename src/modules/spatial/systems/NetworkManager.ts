@@ -25,6 +25,11 @@ export class NetworkManager {
       useGameStore.getState().updatePlayerPosition(userId, x, y);
     });
 
+    socketService.on('player:avatar-updated', ({ userId, avatarConfig }) => {
+      console.log('[NetworkManager] player:avatar-updated', userId);
+      useGameStore.getState().updatePlayerAvatar(userId, avatarConfig);
+    });
+
     socketService.on('desk:updated', (zone) => {
       useGameStore
         .getState()

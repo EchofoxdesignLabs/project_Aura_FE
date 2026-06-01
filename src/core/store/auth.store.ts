@@ -282,6 +282,13 @@ export const useAuthStore = create<AuthState>()((set) => ({
         persistAuth(state.token, nextUser);
         useGameStore.getState().updatePlayerAvatar(nextUser.id, nextUser.avatarConfig);
 
+        // Emit to realtime gateway to sync across network
+        try {
+          socketService.emit('player:update-avatar', { avatarConfig: nextUser.avatarConfig });
+        } catch (err) {
+          console.warn('[authStore] Failed to emit avatar update to network:', err);
+        }
+
         return {
           user: nextUser,
           isLoading: false,

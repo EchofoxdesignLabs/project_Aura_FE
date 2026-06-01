@@ -19,8 +19,21 @@ export function ProximityIndicator() {
     return null;
   }
 
-  // Active peers = users who have any remote media (mic, camera, or screen)
-  const activePeerIds = Object.keys(remoteMedia);
+  // Active peers = users who have any remote media AND are within proximity radius
+  const localPlayer = localPlayerId ? players[localPlayerId] : null;
+  const PROXIMITY_RADIUS = 6; // tiles (matches ProximitySystem)
+
+  const activePeerIds = Object.keys(remoteMedia).filter((userId) => {
+    const peer = players[userId];
+    if (!localPlayer || !peer) return false;
+
+    const dx = localPlayer.x - peer.x;
+    const dy = localPlayer.y - peer.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    return distance <= PROXIMITY_RADIUS;
+  });
+
   if (activePeerIds.length === 0 && !localStream) {
     return null;
   }

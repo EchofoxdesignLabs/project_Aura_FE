@@ -152,7 +152,8 @@ export class OfficeScene extends Phaser.Scene {
       if (velocity.vx !== 0 || velocity.vy !== 0) {
         const state = useGameStore.getState();
         if (state.localPlayerId) {
-          state.updatePlayerPosition(state.localPlayerId, localPlayer.x, localPlayer.y);
+          const gridPos = screenToGrid(localPlayer.x, localPlayer.y, this.isoLayout);
+          state.updatePlayerPosition(state.localPlayerId, gridPos.gx, gridPos.gy);
         }
       }
     }
