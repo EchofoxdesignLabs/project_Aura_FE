@@ -2,6 +2,7 @@ import { socketService } from '@core/services/socket.service';
 import { useGameStore } from '@core/store/game.store';
 import { useMediaStore } from '@core/store/media.store';
 import type { DeskGoToMineResponse, ZoneSnapshot } from '@core/types';
+import { useBuilderStore } from '../../builder/state/builder.store';
 
 export class NetworkManager {
   private lastEmitTime = 0;
@@ -85,6 +86,19 @@ export class NetworkManager {
     socketService.on('media:state', ({ userId, state }) => {
       useMediaStore.getState().updatePeerMediaState(userId, state);
     });
+
+    // Furniture Sync Events
+    socketService.on('furniture:placed', (item) => {
+      useBuilderStore.getState().remotePlaceItem(item);
+    });
+
+    socketService.on('furniture:removed', ({ instanceId }) => {
+      useBuilderStore.getState().remoteRemoveItem(instanceId);
+    });
+
+    socketService.on('furniture:moved', ({ instanceId, gridX, gridY, rotation }) => {
+      useBuilderStore.getState().remoteMoveItem(instanceId, gridX, gridY, rotation);
+    });
   }
 
   public emitMove(x: number, y: number): void {
@@ -152,5 +166,10 @@ export class NetworkManager {
     socketService.off('screenshare:start');
     socketService.off('screenshare:stop');
     socketService.off('media:state');
+
+    // Furniture Events
+    socketService.off('furniture:placed');
+    socketService.off('furniture:removed');
+    socketService.off('furniture:moved');
   }
 }

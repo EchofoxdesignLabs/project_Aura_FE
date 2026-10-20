@@ -129,3 +129,78 @@ export function isPointInPolygon(px: number, py: number, polygon: ScreenPoint[])
   }
   return inside;
 }
+
+// ─── Furniture placement helpers ───
+
+/**
+ * Snaps a screen coordinate to the nearest integer grid cell.
+ * Used by the builder to snap the ghost cursor to the grid.
+ */
+export function snapToGrid(sx: number, sy: number, layout: IsoLayout): GridPoint {
+  const raw = screenToGrid(sx, sy, layout);
+  return {
+    gx: Math.floor(raw.gx),
+    gy: Math.floor(raw.gy),
+  };
+}
+
+/**
+ * Returns the screen-space bounding diamond for a multi-cell furniture item.
+ * The diamond covers all cells from (gx, gy) to (gx + cols, gy + rows).
+ * This is essentially a zone diamond for the furniture's footprint.
+ */
+export function furnitureDiamond(
+  gx: number,
+  gy: number,
+  footprint: [number, number],
+  layout: IsoLayout,
+): ScreenPoint[] {
+  const [cols, rows] = footprint;
+  return [
+    gridToScreen(gx, gy, layout),                  // top vertex
+    gridToScreen(gx + cols, gy, layout),            // right vertex
+    gridToScreen(gx + cols, gy + rows, layout),     // bottom vertex
+    gridToScreen(gx, gy + rows, layout),            // left vertex
+  ];
+}
+
+/**
+ * Calculates the correct iso-sort depth for a furniture item.
+ * Based on the bottom-most occupied cell (highest gx + gy sum)
+ * so the item sorts correctly relative to players walking around it.
+ *
+ * @param gx        Grid column of the top-left cell
+ * @param gy        Grid row of the top-left cell
+ * @param footprint Resolved (already rotated) footprint [cols, rows]
+ * @param depthOffset Extra depth offset from the FurnitureDefinition
+ * @returns Depth value for Phaser's setDepth()
+ */
+export function furnitureDepth(
+  gx: number,
+  gy: number,
+  footprint: [number, number],
+  depthOffset: number = 0,
+): number {
+  // Bottom-most cell is at (gx + cols - 1, gy + rows - 1)
+  const bottomGx = gx + footprint[0] - 1;
+  const bottomGy = gy + footprint[1] - 1;
+  return 10 + isoDepth(bottomGx, bottomGy) * 2 + depthOffset;
+}
+
+/**
+ * Returns the screen center of a furniture item's footprint.
+ * Useful for placing labels or selection indicators.
+ */
+export function furnitureCenter(
+  gx: number,
+  gy: number,
+  footprint: [number, number],
+  layout: IsoLayout,
+): ScreenPoint {
+  return gridToScreen(
+    gx + footprint[0] / 2,
+    gy + footprint[1] / 2,
+    layout,
+  );
+}
+

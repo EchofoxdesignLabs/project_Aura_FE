@@ -142,12 +142,21 @@ export interface PlayerMovePayload {
   y: number;
 }
 
-export interface OfficeStateOffice extends Office {}
+export type OfficeStateOffice = Office;
+
+export interface PlacedFurnitureItem {
+  instanceId: string;
+  catalogId: string;
+  gridX: number;
+  gridY: number;
+  rotation: number;
+}
 
 export interface OfficeStatePayload {
   players: PlayerState[];
   zones: ZoneSnapshot[];
   office: OfficeStateOffice;
+  furniture: PlacedFurnitureItem[];
 }
 
 export interface PlayerLeftPayload {
@@ -357,6 +366,9 @@ export interface SocketClientToServerEvents {
   'screenshare:stop': (payload: Record<string, never>) => void;
   'media:state': (payload: { isMicOn?: boolean; isCameraOn?: boolean }) => void;
   'player:update-avatar': (payload: { avatarConfig: AvatarConfig }) => void;
+  'furniture:place': (payload: PlacedFurnitureItem) => void;
+  'furniture:remove': (payload: { instanceId: string }) => void;
+  'furniture:move': (payload: { instanceId: string; gridX: number; gridY: number; rotation: number }) => void;
 }
 
 export interface SocketServerToClientEvents {
@@ -378,4 +390,7 @@ export interface SocketServerToClientEvents {
   'media:state': (payload: MediaStatePayload) => void;
   'desk:updated': (payload: DeskUpdatedPayload) => void;
   'player:avatar-updated': (payload: { userId: string; avatarConfig: AvatarConfig }) => void;
+  'furniture:placed': (payload: PlacedFurnitureItem) => void;
+  'furniture:removed': (payload: { instanceId: string }) => void;
+  'furniture:moved': (payload: { instanceId: string; gridX: number; gridY: number; rotation: number }) => void;
 }

@@ -11,6 +11,9 @@ import { ProximityIndicator } from './ProximityIndicator';
 import { MeetingOverlay } from './MeetingOverlay';
 import { proximitySystem } from '../systems/ProximitySystem';
 import { meetingSystem } from '../systems/MeetingSystem';
+import { BuilderToolbar } from '../../builder/ui/BuilderToolbar';
+import { CatalogPanel } from '../../builder/ui/CatalogPanel';
+import { useBuilderStore } from '../../builder/state/builder.store';
 
 export function GameContainer() {
   const gameContainerRef = useRef<HTMLDivElement>(null);
@@ -58,10 +61,21 @@ export function GameContainer() {
         socketService.off('office:state', handleOfficeState);
         clearPendingOfficeStateListener = null;
 
+        console.log('[GameContainer] Received office:state payload:', state);
+
         const gameStore = useGameStore.getState();
         gameStore.setOffice(state.office, state.zones);
         gameStore.setAllPlayers(state.players);
         gameStore.setConnectionStatus('connected');
+
+        // Load furniture placements into the builder store
+        const builderStore = useBuilderStore.getState();
+        console.log('[GameContainer] Loading furniture placements into builder store:', state.furniture);
+        builderStore.loadLayout(
+          state.furniture ?? [],
+          state.office.gridWidth,
+          state.office.gridHeight,
+        );
       };
 
       clearPendingOfficeStateListener = () => {
@@ -204,6 +218,9 @@ export function GameContainer() {
       sfuManager.destroy();
       stopMedia();
       
+      // Reset builder store
+      useBuilderStore.getState().reset();
+      
       if (gameRef.current) {
         gameRef.current.destroy(true);
         gameRef.current = null;
@@ -222,6 +239,10 @@ export function GameContainer() {
 
       {/* z-10: HUD Overlay Layer (always visible) */}
       {isEngineReady && <HUD />}
+
+      {/* z-15: Builder components */}
+      {isEngineReady && <BuilderToolbar />}
+      {isEngineReady && <CatalogPanel />}
 
       {/* z-20: Proximity video bubbles (shown when NOT in meeting) */}
       {isEngineReady && <ProximityIndicator />}

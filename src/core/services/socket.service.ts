@@ -81,7 +81,7 @@ export class SocketService {
 
     return new Promise((resolve, reject) => {
       // Call emit directly on the timeout object to preserve 'this' context
-      (socket.timeout(timeoutMs).emit as any)(
+      (socket.timeout(timeoutMs).emit as (...args: unknown[]) => void)(
         event,
         payload,
         (
@@ -112,7 +112,8 @@ export class SocketService {
     event: EventName,
     handler?: SocketServerToClientEvents[EventName],
   ): void {
-    const socket = this.getSocketOrThrow();
+    if (!this.socket) return;
+    const socket = this.socket;
     if (handler) {
       socket.off(event, handler as never);
       return;

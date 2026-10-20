@@ -14,20 +14,28 @@ import {
   zoneDiamond,
   zoneCenter,
   screenToGrid,
+  snapToGrid,
   isPointInPolygon,
   type IsoLayout,
   type ScreenPoint,
 } from '../utils/isometric';
 import { setDeskPanelNetworkManager } from '../utils/desk-panel-bridge';
+import { FurnitureManager } from '../../builder/systems/FurnitureManager';
+import { useBuilderStore } from '../../builder/state/builder.store';
+import { ensureFurnitureTextures } from '../../builder/catalog/asset-loader';
+import { BuilderOverlayScene } from '../../builder/scenes/BuilderOverlayScene';
 
 export class OfficeScene extends Phaser.Scene {
   private inputManager!: InputManager;
   private networkManager!: NetworkManager;
   private playerManager!: PlayerManager;
+  private furnitureManager!: FurnitureManager;
   private debugText!: Phaser.GameObjects.Text;
   public isoLayout!: IsoLayout;
   /** Cached zone polygons for hover/click hit-testing. */
   private zonePolygons: { zone: ZoneSnapshot; polygon: ScreenPoint[] }[] = [];
+  /** Unsubscribe from builder store changes. */
+  private unsubBuilder: (() => void)[] = [];
 
   constructor() {
     super({ key: 'OfficeScene' });
@@ -46,13 +54,16 @@ export class OfficeScene extends Phaser.Scene {
     this.physics.world.setBounds(0, 0, canvasSize.width, canvasSize.height);
     this.cameras.main.setBounds(0, 0, canvasSize.width, canvasSize.height);
 
-    // 2. Draw isometric floor tiles
+    // 2. Generate placeholder furniture textures (canvas-based)
+    ensureFurnitureTextures(this, meta.tileWidth, meta.tileHeight);
+
+    // 3. Draw isometric floor tiles
     this.drawIsoFloor(meta.gridWidth, meta.gridHeight);
 
-    // 3. Draw zones as isometric diamond polygons
+    // 4. Draw zones as isometric diamond polygons
     this.drawIsoZones(state.zones);
 
-    // 4. Initialize Subsystems
+    // 5. Initialize Subsystems
     this.inputManager = new InputManager(this);
 
     this.networkManager = new NetworkManager();
@@ -62,12 +73,30 @@ export class OfficeScene extends Phaser.Scene {
     this.playerManager = new PlayerManager(this);
     this.playerManager.init();
 
-    // 5. Attach Camera to Local Player
+    // 6. Initialize Furniture Manager (builder system)
+    this.furnitureManager = new FurnitureManager(this, this.isoLayout);
+    this.furnitureManager.init();
+
+    // 7. Launch the builder overlay scene (starts sleeping)
+    if (!this.scene.get('BuilderOverlay')) {
+      this.scene.add('BuilderOverlay', BuilderOverlayScene, false, {
+        isoLayout: this.isoLayout,
+        gridCols: meta.gridWidth,
+        gridRows: meta.gridHeight,
+      });
+    }
+    this.scene.launch('BuilderOverlay', {
+      isoLayout: this.isoLayout,
+      gridCols: meta.gridWidth,
+      gridRows: meta.gridHeight,
+    });
+
+    // 8. Attach Camera to Local Player
     if (this.playerManager.localPlayer) {
       this.cameras.main.startFollow(this.playerManager.localPlayer, true, 0.1, 0.1);
     }
 
-    // 6. Create Debug Overlay
+    // 9. Create Debug Overlay
     this.debugText = this.add
       .text(16, 16, '', {
         fontSize: '14px',
@@ -79,31 +108,114 @@ export class OfficeScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(1000);
 
-    // 7. Setup desk hover/click detection (F13)
+    // 10. Setup desk hover/click detection + builder input
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
       const worldX = pointer.worldX;
       const worldY = pointer.worldY;
-      this.handleDeskHover(worldX, worldY);
+
+      const builderState = useBuilderStore.getState();
+      if (builderState.isEditMode) {
+        // In edit mode: handle furniture hover
+        if (!builderState.selectedCatalogItem) {
+          this.furnitureManager.handleHover(worldX, worldY);
+        }
+      } else {
+        // In play mode: handle desk hover
+        this.handleDeskHover(worldX, worldY);
+      }
     });
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (pointer.button !== 0) return; // left-click only
       const worldX = pointer.worldX;
       const worldY = pointer.worldY;
-      this.handleDeskClick(worldX, worldY);
+
+      const builderState = useBuilderStore.getState();
+      if (builderState.isEditMode) {
+        this.handleBuilderClick(worldX, worldY);
+      } else {
+        this.handleDeskClick(worldX, worldY);
+      }
     });
 
-    // 8. Cleanup listeners when the scene shuts down
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+    // 11. Subscribe to builder edit-mode changes
+    this.unsubBuilder.push(
+      useBuilderStore.subscribe(
+        (s) => s.isEditMode,
+        (isEditMode) => {
+          const overlayScene = this.scene.get('BuilderOverlay') as BuilderOverlayScene | undefined;
+          if (overlayScene) {
+            overlayScene.setEditMode(isEditMode);
+          }
+          if (!isEditMode) {
+            this.furnitureManager.clearHighlights();
+            this.furnitureManager.updateSelection(null);
+          }
+        },
+      )
+    );
+
+    // Subscribe to builder selection changes for furniture highlighting
+    this.unsubBuilder.push(
+      useBuilderStore.subscribe(
+        (s) => s.selectedInstanceId,
+        (selectedId) => {
+          this.furnitureManager.updateSelection(selectedId);
+        },
+      )
+    );
+
+    // Subscribe to selected catalog item changes for ghost sprite
+    this.unsubBuilder.push(
+      useBuilderStore.subscribe(
+        (s) => ({ item: s.selectedCatalogItem, rotation: s.currentRotation }),
+        ({ item, rotation }) => {
+          const overlayScene = this.scene.get('BuilderOverlay') as BuilderOverlayScene | undefined;
+          if (overlayScene) {
+            overlayScene.updateGhostItem(item, rotation);
+          }
+        },
+      )
+    );
+
+    // 12. Cleanup listeners when the scene shuts down or is destroyed
+    let isCleanedUp = false;
+    const cleanup = () => {
+      if (isCleanedUp) return;
+      isCleanedUp = true;
+
       this.playerManager.destroy();
       this.networkManager.destroy();
       this.inputManager.destroy();
-    });
+      this.furnitureManager.destroy();
+      this.unsubBuilder.forEach((unsub) => unsub());
+      this.unsubBuilder = [];
+      // Stop builder overlay scene if scene manager is active
+      try {
+        if (this.scene && this.scene.get('BuilderOverlay')) {
+          this.scene.stop('BuilderOverlay');
+        }
+      } catch {
+        // Scene manager may already be disposed
+      }
+    };
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, cleanup);
+    this.events.once(Phaser.Scenes.Events.DESTROY, cleanup);
   }
 
   update(_time: number, delta: number) {
     const localPlayer = this.playerManager.localPlayer;
     if (!localPlayer) return;
+
+    // In edit mode, suppress player movement
+    const builderState = useBuilderStore.getState();
+    if (builderState.isEditMode) {
+      const body = localPlayer.body as Phaser.Physics.Arcade.Body;
+      if (body) body.setVelocity(0, 0);
+      this.updateDebugText(localPlayer);
+      return;
+    }
 
     // Process Input — get logical grid-space velocity
     const velocity = this.inputManager.getVelocity();
@@ -358,19 +470,60 @@ export class OfficeScene extends Phaser.Scene {
     useGameStore.getState().setSelectedDeskZoneId(null);
   }
 
+  // ─── Builder Click ───
+
+  private handleBuilderClick(worldX: number, worldY: number) {
+    const builderState = useBuilderStore.getState();
+
+    if (builderState.isDeleteMode) {
+      // Delete mode: click to remove the item under cursor
+      const gridPos = snapToGrid(worldX, worldY, this.isoLayout);
+      const grid = builderState.getOccupancyGrid();
+      const instanceId = grid.getAt(gridPos.gx, gridPos.gy);
+      if (instanceId) {
+        builderState.removeItem(instanceId);
+      }
+      return;
+    }
+
+    if (builderState.selectedCatalogItem && builderState.ghostValid) {
+      // Place mode: place the selected item at the ghost position
+      builderState.placeItem();
+      return;
+    }
+
+    if (!builderState.selectedCatalogItem) {
+      // No item selected: click to select an existing item
+      const gridPos = snapToGrid(worldX, worldY, this.isoLayout);
+      const grid = builderState.getOccupancyGrid();
+      const instanceId = grid.getAt(gridPos.gx, gridPos.gy);
+      builderState.selectInstance(instanceId);
+    }
+  }
+
   // ─── Debug ───
 
   private updateDebugText(localPlayer: Phaser.GameObjects.Container) {
     const state = useGameStore.getState();
+    const builderState = useBuilderStore.getState();
     const playerCount = Object.keys(state.players).length;
     const gridPos = screenToGrid(localPlayer.x, localPlayer.y, this.isoLayout);
-    this.debugText.setText([
+    const lines = [
       `[ DEBUG OVERLAY ]`,
       `Connected : ${socketService.isConnected()}`,
       `Players   : ${playerCount}`,
       `Local ID  : ${state.localPlayerId}`,
       `Screen    : X:${Math.round(localPlayer.x)} Y:${Math.round(localPlayer.y)}`,
       `Grid      : X:${gridPos.gx.toFixed(1)} Y:${gridPos.gy.toFixed(1)}`,
-    ]);
+    ];
+    if (builderState.isEditMode) {
+      lines.push(
+        `[ BUILDER ]`,
+        `Mode      : EDIT`,
+        `Items     : ${builderState.placedItems.length}`,
+        `Dirty     : ${builderState.isDirty}`,
+      );
+    }
+    this.debugText.setText(lines);
   }
 }
