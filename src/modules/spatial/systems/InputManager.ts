@@ -1,15 +1,15 @@
 import Phaser from 'phaser';
+import { AVATAR_WALK_SPEED } from '../entities/avatar-animations';
 
 /**
  * InputManager — processes WASD / arrow key input.
  *
- * Movement is emitted as **screen-space velocity** (pixels/second).
- * The OfficeScene converts the resulting screen position back to
- * grid coordinates before emitting `player:move` to the server.
+ * Movement is a **screen-space velocity** (pixels/second). OfficeScene resolves it against the collision grid
+ * and converts the result to grid coordinates before emitting `player:move`.
  *
- * In isometric view, pressing "up" moves the player visually upward
- * on screen, which corresponds to moving diagonally on the grid.
- * This feels natural and matches SoWork-style controls.
+ * Up/down/left/right move straight up/down/left/right on screen. Two keys together move along a tile edge
+ * (the 2:1 isometric diagonal, Asset Rulebook R-17) rather than at 45°, so the drawn se/sw/ne/nw views match
+ * the path and the avatar walks parallel to desks and walls.
  */
 export class InputManager {
   private cursors: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -20,8 +20,7 @@ export class InputManager {
     D: Phaser.Input.Keyboard.Key;
   };
 
-  // Fixed movement speed in pixels per second
-  private readonly speed = 200;
+  private readonly speed = AVATAR_WALK_SPEED;
 
   constructor(scene: Phaser.Scene) {
     if (!scene.input.keyboard) {
@@ -38,39 +37,30 @@ export class InputManager {
     }) as unknown as typeof this.wasdKeys;
   }
 
-  /**
-   * Calculates and returns the normalized velocity vector for the current frame.
-   * Normalization ensures that diagonal movement is not faster than cardinal movement.
-   */
+  /** Velocity for the current frame, in screen px/s. Diagonals follow the 2:1 tile edges at the same speed. */
   public getVelocity(): { vx: number; vy: number } {
     let vx = 0;
     let vy = 0;
 
-    const isLeft = this.cursors.left.isDown || this.wasdKeys.A.isDown;
-    const isRight = this.cursors.right.isDown || this.wasdKeys.D.isDown;
-    const isUp = this.cursors.up.isDown || this.wasdKeys.W.isDown;
-    const isDown = this.cursors.down.isDown || this.wasdKeys.S.isDown;
+    if (this.cursors.left.isDown || this.wasdKeys.A.isDown) vx -= 1;
+    if (this.cursors.right.isDown || this.wasdKeys.D.isDown) vx += 1;
+    if (this.cursors.up.isDown || this.wasdKeys.W.isDown) vy -= 1;
+    if (this.cursors.down.isDown || this.wasdKeys.S.isDown) vy += 1;
 
-    if (isLeft) vx -= 1;
-    if (isRight) vx += 1;
-    if (isUp) vy -= 1;
-    if (isDown) vy += 1;
-
-    // Normalize the vector if moving diagonally
     if (vx !== 0 && vy !== 0) {
-      const length = Math.sqrt(vx * vx + vy * vy);
-      vx /= length;
-      vy /= length;
+      vy *= 0.5; // 2 px across, 1 px down: along a tile edge
     }
 
+    const length = Math.hypot(vx, vy);
+    if (length === 0) return { vx: 0, vy: 0 };
+
     return {
-      vx: vx * this.speed,
-      vy: vy * this.speed,
+      vx: (vx / length) * this.speed,
+      vy: (vy / length) * this.speed,
     };
   }
 
   public destroy(): void {
-    // Phaser handles basic input cleanup when the scene is destroyed,
-    // but this method is exposed for any future explicit teardown needs.
+    // Phaser removes keyboard keys when the scene shuts down.
   }
 }

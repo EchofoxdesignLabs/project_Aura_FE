@@ -56,31 +56,25 @@ export interface FurnitureDefinition {
   footprint: [number, number];
 
   /**
-   * Phaser texture key used to load this item's sprite.
-   * For atlas-packed items: the atlas key (e.g., 'office-furniture').
-   * For individual images: the single-image key (e.g., 'desk-standard-01').
+   * Key of the generated placeholder texture, used only when the item has no sprite sheet from the art
+   * pipeline. Real art, canvas size and anchor come from the manifest (see furniture-art.ts).
    */
   textureKey: string;
 
   /**
-   * Frame name within a texture atlas, or null for single-image textures.
-   * Example: 'desk-standard-01' within the 'office-furniture' atlas.
-   */
-  frameName: string | null;
-
-  /**
-   * Pixel anchor offset from the top-left of the sprite to the isometric
-   * grid origin point. Used for precise sprite positioning on the grid.
-   * { x: 0, y: 0 } means the sprite's origin aligns with the grid cell's
-   * screen-space top vertex.
-   */
-  anchorOffset: { x: number; y: number };
-
-  /**
-   * Whether this item blocks player movement (spawns an Arcade Physics body).
-   * Desks, walls, and storage typically block. Plants and decorations may not.
+   * Whether this item blocks avatar movement (marks its cells solid in the collision grid).
+   * Desks, walls, and storage typically block. Chairs, plants and decorations do not.
    */
   blocksMovement: boolean;
+
+  /**
+   * 'surface' items (monitors, laptops, mugs — Asset Rulebook R-26) sit on top of a host item instead of the
+   * floor. They do not take floor cells and are drawn lifted by the host's `surfaceHeight`. Default 'floor'.
+   */
+  placement?: 'floor' | 'surface';
+
+  /** Height in art pixels of this item's top surface, if surface items may be placed on it (desks, tables). */
+  surfaceHeight?: number;
 
   /**
    * Allowed rotations in degrees. Typically [0, 90, 180, 270] for square items,
@@ -89,15 +83,8 @@ export interface FurnitureDefinition {
   allowedRotations: number[];
 
   /**
-   * Additional depth offset applied to the iso-sort depth calculation.
-   * Positive values render the item "in front of" other objects at the same
-   * grid position. Useful for tall items like bookshelves.
-   */
-  depthOffset: number;
-
-  /**
-   * Relative URL to a 64×64 thumbnail PNG for the React catalog panel.
-   * Example: '/assets/furniture/thumbnails/desk-standard-01.png'
+   * Path under public/ to a 64×64 thumbnail PNG for the React catalog panel, without a leading slash
+   * (resolve it with `assetUrl`). Example: 'assets/furniture/thumbnails/desk-standard-01.png'
    */
   thumbnailUrl: string;
 
@@ -161,6 +148,10 @@ export function getCellsOccupied(
     }
   }
   return cells;
+}
+
+export function isSurfaceItem(definition: Pick<FurnitureDefinition, 'placement'>): boolean {
+  return definition.placement === 'surface';
 }
 
 /** Maximum allowed footprint dimension (per design decision). */

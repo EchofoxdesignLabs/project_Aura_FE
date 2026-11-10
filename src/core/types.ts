@@ -85,8 +85,14 @@ export interface OfficeLayoutMetadata {
   layoutMode: string;
   gridWidth: number;
   gridHeight: number;
+  /** Stored by the backend; the engine always renders the art's 64 × 32 tiles (see isometric.ts). */
   tileWidth: number;
   tileHeight: number;
+  /**
+   * Tiled map drawn for this office (floors, walls, wall collision): public/assets/maps/<mapKey>.tmj.
+   * null for offices created before the asset pipeline; they get a plain floor until reseeded.
+   */
+  mapKey?: string | null;
 }
 
 export interface Office extends OfficeLayoutMetadata {

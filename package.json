@@ -9,6 +9,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "assets:sync": "node scripts/sync-assets.mjs",
     "electron:dev": "concurrently -k \"cross-env BROWSER=none npm run dev\" \"npm run electron:wait\"",
     "electron:wait": "wait-on tcp:5173 && tsc -p electron/tsconfig.json && electron .",
     "electron:build": "npm run build && tsc -p electron/tsconfig.json && electron-builder"

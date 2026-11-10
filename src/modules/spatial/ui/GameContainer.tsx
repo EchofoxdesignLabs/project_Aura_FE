@@ -179,12 +179,12 @@ export function GameContainer() {
         parent: gameContainerRef.current,
         width: window.innerWidth,
         height: window.innerHeight,
-        backgroundColor: '#020617', // slate-950
+        backgroundColor: '#2b2f3a', // the office map overrides this with its own background colour
         scene: [OfficeScene],
-        physics: {
-          default: 'arcade',
-          arcade: { gravity: { x: 0, y: 0 } },
-        },
+        // Pixel art drawn at 1×, shown only at whole zoom steps (Asset Rulebook R-07, R-08):
+        // nearest-neighbour filtering and whole-pixel positions keep edges sharp.
+        pixelArt: true,
+        roundPixels: true,
         scale: {
           mode: Phaser.Scale.RESIZE,
           autoCenter: Phaser.Scale.CENTER_BOTH,

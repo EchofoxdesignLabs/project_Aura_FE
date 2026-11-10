@@ -1,0 +1,605 @@
+{
+  "id": "avatar-placeholder-01",
+  "kind": "avatar-composite-placeholder",
+  "frameSize": [64, 128],
+  "feetPivot": [32, 120],
+  "standingHeadTop": 24,
+  "headReference": [32, 40],
+  "notes": "Placeholder composite (all layers baked). head = head-centre pixel per frame; headOffset = offset from idle-s frame 0, for rigid layers (R-40). Mirror e/sw/ne by flipping se/w/nw (R-14).",
+  "tags": [
+    {
+      "name": "idle-s",
+      "frames": 2,
+      "durationMs": 500,
+      "loop": true
+    },
+    {
+      "name": "idle-se",
+      "frames": 2,
+      "durationMs": 500,
+      "loop": true
+    },
+    {
+      "name": "idle-w",
+      "frames": 2,
+      "durationMs": 500,
+      "loop": true
+    },
+    {
+      "name": "idle-nw",
+      "frames": 2,
+      "durationMs": 500,
+      "loop": true
+    },
+    {
+      "name": "idle-n",
+      "frames": 2,
+      "durationMs": 500,
+      "loop": true
+    },
+    {
+      "name": "walk-s",
+      "frames": 6,
+      "durationMs": 100,
+      "loop": true
+    },
+    {
+      "name": "walk-se",
+      "frames": 6,
+      "durationMs": 100,
+      "loop": true
+    },
+    {
+      "name": "walk-w",
+      "frames": 6,
+      "durationMs": 100,
+      "loop": true
+    },
+    {
+      "name": "walk-nw",
+      "frames": 6,
+      "durationMs": 100,
+      "loop": true
+    },
+    {
+      "name": "walk-n",
+      "frames": 6,
+      "durationMs": 100,
+      "loop": true
+    },
+    {
+      "name": "sit-se",
+      "frames": 1,
+      "durationMs": 1000,
+      "loop": false
+    },
+    {
+      "name": "sit-nw",
+      "frames": 1,
+      "durationMs": 1000,
+      "loop": false
+    },
+    {
+      "name": "work-se",
+      "frames": 4,
+      "durationMs": 125,
+      "loop": true
+    },
+    {
+      "name": "work-nw",
+      "frames": 4,
+      "durationMs": 125,
+      "loop": true
+    },
+    {
+      "name": "wave-s",
+      "frames": 6,
+      "durationMs": 100,
+      "loop": false
+    },
+    {
+      "name": "wave-se",
+      "frames": 6,
+      "durationMs": 100,
+      "loop": false
+    }
+  ],
+  "frames": [
+    {
+      "frame": 0,
+      "tag": "idle-s",
+      "index": 0,
+      "durationMs": 500,
+      "head": [32, 40],
+      "headOffset": [0, 0]
+    },
+    {
+      "frame": 1,
+      "tag": "idle-s",
+      "index": 1,
+      "durationMs": 500,
+      "head": [32, 41],
+      "headOffset": [0, 1]
+    },
+    {
+      "frame": 2,
+      "tag": "idle-se",
+      "index": 0,
+      "durationMs": 500,
+      "head": [33, 40],
+      "headOffset": [1, 0]
+    },
+    {
+      "frame": 3,
+      "tag": "idle-se",
+      "index": 1,
+      "durationMs": 500,
+      "head": [33, 41],
+      "headOffset": [1, 1]
+    },
+    {
+      "frame": 4,
+      "tag": "idle-w",
+      "index": 0,
+      "durationMs": 500,
+      "head": [31, 40],
+      "headOffset": [-1, 0]
+    },
+    {
+      "frame": 5,
+      "tag": "idle-w",
+      "index": 1,
+      "durationMs": 500,
+      "head": [31, 41],
+      "headOffset": [-1, 1]
+    },
+    {
+      "frame": 6,
+      "tag": "idle-nw",
+      "index": 0,
+      "durationMs": 500,
+      "head": [31, 40],
+      "headOffset": [-1, -1]
+    },
+    {
+      "frame": 7,
+      "tag": "idle-nw",
+      "index": 1,
+      "durationMs": 500,
+      "head": [31, 41],
+      "headOffset": [-1, 0]
+    },
+    {
+      "frame": 8,
+      "tag": "idle-n",
+      "index": 0,
+      "durationMs": 500,
+      "head": [32, 40],
+      "headOffset": [0, -1]
+    },
+    {
+      "frame": 9,
+      "tag": "idle-n",
+      "index": 1,
+      "durationMs": 500,
+      "head": [32, 41],
+      "headOffset": [0, 0]
+    },
+    {
+      "frame": 10,
+      "tag": "walk-s",
+      "index": 0,
+      "durationMs": 100,
+      "head": [32, 40],
+      "headOffset": [0, 0]
+    },
+    {
+      "frame": 11,
+      "tag": "walk-s",
+      "index": 1,
+      "durationMs": 100,
+      "head": [32, 41],
+      "headOffset": [0, 1]
+    },
+    {
+      "frame": 12,
+      "tag": "walk-s",
+      "index": 2,
+      "durationMs": 100,
+      "head": [32, 41],
+      "headOffset": [0, 1]
+    },
+    {
+      "frame": 13,
+      "tag": "walk-s",
+      "index": 3,
+      "durationMs": 100,
+      "head": [32, 40],
+      "headOffset": [0, 0]
+    },
+    {
+      "frame": 14,
+      "tag": "walk-s",
+      "index": 4,
+      "durationMs": 100,
+      "head": [32, 41],
+      "headOffset": [0, 1]
+    },
+    {
+      "frame": 15,
+      "tag": "walk-s",
+      "index": 5,
+      "durationMs": 100,
+      "head": [32, 41],
+      "headOffset": [0, 1]
+    },
+    {
+      "frame": 16,
+      "tag": "walk-se",
+      "index": 0,
+      "durationMs": 100,
+      "head": [33, 40],
+      "headOffset": [1, 0]
+    },
+    {
+      "frame": 17,
+      "tag": "walk-se",
+      "index": 1,
+      "durationMs": 100,
+      "head": [33, 41],
+      "headOffset": [1, 1]
+    },
+    {
+      "frame": 18,
+      "tag": "walk-se",
+      "index": 2,
+      "durationMs": 100,
+      "head": [33, 41],
+      "headOffset": [1, 1]
+    },
+    {
+      "frame": 19,
+      "tag": "walk-se",
+      "index": 3,
+      "durationMs": 100,
+      "head": [33, 40],
+      "headOffset": [1, 0]
+    },
+    {
+      "frame": 20,
+      "tag": "walk-se",
+      "index": 4,
+      "durationMs": 100,
+      "head": [33, 41],
+      "headOffset": [1, 1]
+    },
+    {
+      "frame": 21,
+      "tag": "walk-se",
+      "index": 5,
+      "durationMs": 100,
+      "head": [33, 41],
+      "headOffset": [1, 1]
+    },
+    {
+      "frame": 22,
+      "tag": "walk-w",
+      "index": 0,
+      "durationMs": 100,
+      "head": [31, 40],
+      "headOffset": [-1, 0]
+    },
+    {
+      "frame": 23,
+      "tag": "walk-w",
+      "index": 1,
+      "durationMs": 100,
+      "head": [31, 41],
+      "headOffset": [-1, 1]
+    },
+    {
+      "frame": 24,
+      "tag": "walk-w",
+      "index": 2,
+      "durationMs": 100,
+      "head": [31, 41],
+      "headOffset": [-1, 1]
+    },
+    {
+      "frame": 25,
+      "tag": "walk-w",
+      "index": 3,
+      "durationMs": 100,
+      "head": [31, 40],
+      "headOffset": [-1, 0]
+    },
+    {
+      "frame": 26,
+      "tag": "walk-w",
+      "index": 4,
+      "durationMs": 100,
+      "head": [31, 41],
+      "headOffset": [-1, 1]
+    },
+    {
+      "frame": 27,
+      "tag": "walk-w",
+      "index": 5,
+      "durationMs": 100,
+      "head": [31, 41],
+      "headOffset": [-1, 1]
+    },
+    {
+      "frame": 28,
+      "tag": "walk-nw",
+      "index": 0,
+      "durationMs": 100,
+      "head": [31, 40],
+      "headOffset": [-1, -1]
+    },
+    {
+      "frame": 29,
+      "tag": "walk-nw",
+      "index": 1,
+      "durationMs": 100,
+      "head": [31, 41],
+      "headOffset": [-1, 0]
+    },
+    {
+      "frame": 30,
+      "tag": "walk-nw",
+      "index": 2,
+      "durationMs": 100,
+      "head": [31, 41],
+      "headOffset": [-1, 0]
+    },
+    {
+      "frame": 31,
+      "tag": "walk-nw",
+      "index": 3,
+      "durationMs": 100,
+      "head": [31, 40],
+      "headOffset": [-1, -1]
+    },
+    {
+      "frame": 32,
+      "tag": "walk-nw",
+      "index": 4,
+      "durationMs": 100,
+      "head": [31, 41],
+      "headOffset": [-1, 0]
+    },
+    {
+      "frame": 33,
+      "tag": "walk-nw",
+      "index": 5,
+      "durationMs": 100,
+      "head": [31, 41],
+      "headOffset": [-1, 0]
+    },
+    {
+      "frame": 34,
+      "tag": "walk-n",
+      "index": 0,
+      "durationMs": 100,
+      "head": [32, 40],
+      "headOffset": [0, -1]
+    },
+    {
+      "frame": 35,
+      "tag": "walk-n",
+      "index": 1,
+      "durationMs": 100,
+      "head": [32, 41],
+      "headOffset": [0, 0]
+    },
+    {
+      "frame": 36,
+      "tag": "walk-n",
+      "index": 2,
+      "durationMs": 100,
+      "head": [32, 41],
+      "headOffset": [0, 0]
+    },
+    {
+      "frame": 37,
+      "tag": "walk-n",
+      "index": 3,
+      "durationMs": 100,
+      "head": [32, 40],
+      "headOffset": [0, -1]
+    },
+    {
+      "frame": 38,
+      "tag": "walk-n",
+      "index": 4,
+      "durationMs": 100,
+      "head": [32, 41],
+      "headOffset": [0, 0]
+    },
+    {
+      "frame": 39,
+      "tag": "walk-n",
+      "index": 5,
+      "durationMs": 100,
+      "head": [32, 41],
+      "headOffset": [0, 0]
+    },
+    {
+      "frame": 40,
+      "tag": "sit-se",
+      "index": 0,
+      "durationMs": 1000,
+      "head": [33, 46],
+      "headOffset": [1, 6]
+    },
+    {
+      "frame": 41,
+      "tag": "sit-nw",
+      "index": 0,
+      "durationMs": 1000,
+      "head": [31, 46],
+      "headOffset": [-1, 5]
+    },
+    {
+      "frame": 42,
+      "tag": "work-se",
+      "index": 0,
+      "durationMs": 125,
+      "head": [33, 46],
+      "headOffset": [1, 6]
+    },
+    {
+      "frame": 43,
+      "tag": "work-se",
+      "index": 1,
+      "durationMs": 125,
+      "head": [33, 46],
+      "headOffset": [1, 6]
+    },
+    {
+      "frame": 44,
+      "tag": "work-se",
+      "index": 2,
+      "durationMs": 125,
+      "head": [33, 46],
+      "headOffset": [1, 6]
+    },
+    {
+      "frame": 45,
+      "tag": "work-se",
+      "index": 3,
+      "durationMs": 125,
+      "head": [33, 46],
+      "headOffset": [1, 6]
+    },
+    {
+      "frame": 46,
+      "tag": "work-nw",
+      "index": 0,
+      "durationMs": 125,
+      "head": [31, 46],
+      "headOffset": [-1, 5]
+    },
+    {
+      "frame": 47,
+      "tag": "work-nw",
+      "index": 1,
+      "durationMs": 125,
+      "head": [31, 46],
+      "headOffset": [-1, 5]
+    },
+    {
+      "frame": 48,
+      "tag": "work-nw",
+      "index": 2,
+      "durationMs": 125,
+      "head": [31, 46],
+      "headOffset": [-1, 5]
+    },
+    {
+      "frame": 49,
+      "tag": "work-nw",
+      "index": 3,
+      "durationMs": 125,
+      "head": [31, 46],
+      "headOffset": [-1, 5]
+    },
+    {
+      "frame": 50,
+      "tag": "wave-s",
+      "index": 0,
+      "durationMs": 100,
+      "head": [32, 40],
+      "headOffset": [0, 0]
+    },
+    {
+      "frame": 51,
+      "tag": "wave-s",
+      "index": 1,
+      "durationMs": 100,
+      "head": [32, 40],
+      "headOffset": [0, 0]
+    },
+    {
+      "frame": 52,
+      "tag": "wave-s",
+      "index": 2,
+      "durationMs": 100,
+      "head": [32, 40],
+      "headOffset": [0, 0]
+    },
+    {
+      "frame": 53,
+      "tag": "wave-s",
+      "index": 3,
+      "durationMs": 100,
+      "head": [32, 40],
+      "headOffset": [0, 0]
+    },
+    {
+      "frame": 54,
+      "tag": "wave-s",
+      "index": 4,
+      "durationMs": 100,
+      "head": [32, 40],
+      "headOffset": [0, 0]
+    },
+    {
+      "frame": 55,
+      "tag": "wave-s",
+      "index": 5,
+      "durationMs": 100,
+      "head": [32, 40],
+      "headOffset": [0, 0]
+    },
+    {
+      "frame": 56,
+      "tag": "wave-se",
+      "index": 0,
+      "durationMs": 100,
+      "head": [33, 40],
+      "headOffset": [1, 0]
+    },
+    {
+      "frame": 57,
+      "tag": "wave-se",
+      "index": 1,
+      "durationMs": 100,
+      "head": [33, 40],
+      "headOffset": [1, 0]
+    },
+    {
+      "frame": 58,
+      "tag": "wave-se",
+      "index": 2,
+      "durationMs": 100,
+      "head": [33, 40],
+      "headOffset": [1, 0]
+    },
+    {
+      "frame": 59,
+      "tag": "wave-se",
+      "index": 3,
+      "durationMs": 100,
+      "head": [33, 40],
+      "headOffset": [1, 0]
+    },
+    {
+      "frame": 60,
+      "tag": "wave-se",
+      "index": 4,
+      "durationMs": 100,
+      "head": [33, 40],
+      "headOffset": [1, 0]
+    },
+    {
+      "frame": 61,
+      "tag": "wave-se",
+      "index": 5,
+      "durationMs": 100,
+      "head": [33, 40],
+      "headOffset": [1, 0]
+    }
+  ]
+}

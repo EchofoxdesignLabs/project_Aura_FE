@@ -218,7 +218,7 @@ export const useBuilderStore = create<BuilderState>()(
 
           // Check if it fits in the new rotation
           const rotatedFootprint = getRotatedFootprint(definition.footprint, nextRotation);
-          if (!occupancyGrid.canPlace(item.gridX, item.gridY, rotatedFootprint, item.instanceId)) {
+          if (!occupancyGrid.canPlace(item.gridX, item.gridY, rotatedFootprint, item.catalogId, item.instanceId)) {
             return {};
           }
 
@@ -266,6 +266,7 @@ export const useBuilderStore = create<BuilderState>()(
           state.ghostGridX,
           state.ghostGridY,
           rotatedFootprint,
+          state.selectedCatalogItem.id,
         );
 
         return {
@@ -296,7 +297,7 @@ export const useBuilderStore = create<BuilderState>()(
           state.selectedCatalogItem.footprint,
           state.currentRotation,
         );
-        const isValid = occupancyGrid.canPlace(gx, gy, rotatedFootprint);
+        const isValid = occupancyGrid.canPlace(gx, gy, rotatedFootprint, state.selectedCatalogItem.id);
 
         return {
           ghostGridX: gx,
@@ -371,7 +372,7 @@ export const useBuilderStore = create<BuilderState>()(
       if (!definition) return false;
 
       const rotatedFootprint = getRotatedFootprint(definition.footprint, item.rotation);
-      if (!occupancyGrid.canPlace(newGx, newGy, rotatedFootprint, instanceId)) {
+      if (!occupancyGrid.canPlace(newGx, newGy, rotatedFootprint, item.catalogId, instanceId)) {
         return false;
       }
 

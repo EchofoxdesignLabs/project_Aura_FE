@@ -4,18 +4,31 @@ import type { OfficeLayoutMetadata, ZoneSnapshot } from '@core/types';
  * Isometric projection utilities — pure functions, no Phaser dependency.
  *
  * Coordinate systems:
- *   - **Grid** (logical): integer tile column/row or fractional position.
- *   - **Screen** (pixel): the 2D canvas position after isometric projection.
+ *   - **Grid** (logical): tile column/row, integer or fractional. Cell (x, y) spans grid [x, x+1] × [y, y+1].
+ *   - **Screen** (pixel): the 2D world position after isometric projection, at 1× zoom.
  *
  * The standard 2:1 isometric transform is used:
  *   screenX = (gridX - gridY) * (tileWidth / 2) + originX
  *   screenY = (gridX + gridY) * (tileHeight / 2) + originY
+ *
+ * gridToScreen(x, y) of an integer point is the **top vertex** of cell (x, y). This matches Tiled's isometric
+ * maps and the Aura Asset Rulebook, where a furniture anchor is the top tip of its footprint (R-20).
  */
+
+/** Tile size of all Aura art (Asset Rulebook R-01). Pixel sizes are a rendering concern only. */
+export const TILE_WIDTH = 64;
+export const TILE_HEIGHT = 32;
+
+/** Space above the grid's top vertex for back walls (128 px + 6 px cap, R-30) and tall items against them. */
+const WALL_HEADROOM = 160;
+/** Space left/right of the grid and below it, so edge sprites are not clipped by the world bounds. */
+const SIDE_MARGIN = 32;
+const BOTTOM_MARGIN = 48;
 
 export interface IsoLayout {
   tileWidth: number;
   tileHeight: number;
-  /** Pixel offset for the top-center origin of the isometric grid. */
+  /** Screen position of the grid's top vertex, grid (0, 0). */
   originX: number;
   originY: number;
 }
@@ -28,6 +41,13 @@ export interface ScreenPoint {
 export interface GridPoint {
   gx: number;
   gy: number;
+}
+
+export interface ScreenRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
 }
 
 // ─── Core transforms ───
@@ -54,49 +74,51 @@ export function screenToGrid(sx: number, sy: number, layout: IsoLayout): GridPoi
 
 // ─── Layout from office metadata ───
 
-export function buildIsoLayout(meta: OfficeLayoutMetadata): IsoLayout {
-  const originX = (meta.gridWidth * meta.tileWidth) / 2;
-  const originY = meta.tileHeight; // small top margin
+/**
+ * Builds the projection for an office. The tile size is always the art's 64 × 32 (R-01): the office's
+ * stored tileWidth/tileHeight are ignored so older offices seeded with 96 × 48 still line up with the art.
+ */
+export function buildIsoLayout(meta: Pick<OfficeLayoutMetadata, 'gridWidth' | 'gridHeight'>): IsoLayout {
   return {
-    tileWidth: meta.tileWidth,
-    tileHeight: meta.tileHeight,
-    originX,
-    originY,
+    tileWidth: TILE_WIDTH,
+    tileHeight: TILE_HEIGHT,
+    // The left-most grid point is (0, gridHeight), so the top vertex sits gridHeight half-tiles from the left.
+    originX: (meta.gridHeight * TILE_WIDTH) / 2 + SIDE_MARGIN,
+    originY: WALL_HEADROOM,
   };
 }
 
-/** Total pixel canvas size required for the full isometric grid. */
-export function getIsoCanvasSize(meta: OfficeLayoutMetadata): { width: number; height: number } {
+/** Total pixel size of the world: the grid diamond plus wall headroom and margins. */
+export function getIsoCanvasSize(
+  meta: Pick<OfficeLayoutMetadata, 'gridWidth' | 'gridHeight'>,
+): { width: number; height: number } {
+  const span = meta.gridWidth + meta.gridHeight;
   return {
-    width: (meta.gridWidth + meta.gridHeight) * (meta.tileWidth / 2),
-    height: (meta.gridWidth + meta.gridHeight) * (meta.tileHeight / 2) + meta.tileHeight * 2,
+    width: span * (TILE_WIDTH / 2) + SIDE_MARGIN * 2,
+    height: WALL_HEADROOM + span * (TILE_HEIGHT / 2) + BOTTOM_MARGIN,
   };
 }
 
 // ─── Diamond polygon helpers ───
 
-/** Returns the 4 screen-space vertices of a single tile diamond. */
+/** The 4 screen-space vertices of cell (gx, gy): top, right, bottom, left. */
 export function tileDiamond(gx: number, gy: number, layout: IsoLayout): ScreenPoint[] {
-  const { sx, sy } = gridToScreen(gx, gy, layout);
-  const halfW = layout.tileWidth / 2;
-  const halfH = layout.tileHeight / 2;
   return [
-    { sx, sy: sy - halfH },           // top
-    { sx: sx + halfW, sy },            // right
-    { sx, sy: sy + halfH },            // bottom
-    { sx: sx - halfW, sy },            // left
+    gridToScreen(gx, gy, layout),
+    gridToScreen(gx + 1, gy, layout),
+    gridToScreen(gx + 1, gy + 1, layout),
+    gridToScreen(gx, gy + 1, layout),
   ];
 }
 
-/** Returns screen-space polygon for a rectangular grid zone (x,y,w,h in grid coords). */
+/** Screen-space polygon for a rectangular grid zone (x, y, width, height in grid units). */
 export function zoneDiamond(zone: ZoneSnapshot, layout: IsoLayout): ScreenPoint[] {
   const { x, y, width, height } = zone;
-  // The 4 corners of a grid-aligned rectangle in iso projection
   return [
-    gridToScreen(x, y, layout),                       // top-left corner → top vertex
-    gridToScreen(x + width, y, layout),                // top-right → right vertex
-    gridToScreen(x + width, y + height, layout),       // bottom-right → bottom vertex
-    gridToScreen(x, y + height, layout),               // bottom-left → left vertex
+    gridToScreen(x, y, layout),                   // top vertex
+    gridToScreen(x + width, y, layout),           // right vertex
+    gridToScreen(x + width, y + height, layout),  // bottom vertex
+    gridToScreen(x, y + height, layout),          // left vertex
   ];
 }
 
@@ -106,10 +128,30 @@ export function zoneCenter(zone: ZoneSnapshot, layout: IsoLayout): ScreenPoint {
 }
 
 // ─── Depth sorting ───
+//
+// Every world object gets a **sort key**: gx + gy of its front-most ground point (the bottom vertex of a
+// footprint, the feet of an avatar). Higher keys draw later. Depth bands keep the floor, decals and
+// screen-space labels out of the sorted range. `DepthSorter` refines avatar depth against furniture and walls.
 
-/** Depth value for a grid position — higher means rendered later (in front). */
-export function isoDepth(gx: number, gy: number): number {
-  return gx + gy;
+export const DEPTH = {
+  FLOOR: 0,
+  ZONE_FILL: 2,
+  DECAL: 5,
+  /** Sorted world objects start here: depth = WORLD + key × 10. */
+  WORLD: 100,
+  ZONE_LABEL: 50_000,
+  NAME_TAG: 60_000,
+  DEBUG: 100_000,
+} as const;
+
+/** Phaser depth for a sort key. */
+export function depthForKey(key: number): number {
+  return DEPTH.WORLD + key * 10;
+}
+
+/** Sort key of a footprint: gx + gy of its bottom vertex (Asset Rulebook R-22, "sorted by its front-most tile"). */
+export function footprintSortKey(gx: number, gy: number, footprint: [number, number]): number {
+  return gx + footprint[0] + gy + footprint[1];
 }
 
 // ─── Hit-testing ───
@@ -130,12 +172,13 @@ export function isPointInPolygon(px: number, py: number, polygon: ScreenPoint[])
   return inside;
 }
 
+export function rectsOverlap(a: ScreenRect, b: ScreenRect): boolean {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
 // ─── Furniture placement helpers ───
 
-/**
- * Snaps a screen coordinate to the nearest integer grid cell.
- * Used by the builder to snap the ghost cursor to the grid.
- */
+/** Snaps a screen coordinate to the grid cell that contains it. */
 export function snapToGrid(sx: number, sy: number, layout: IsoLayout): GridPoint {
   const raw = screenToGrid(sx, sy, layout);
   return {
@@ -145,9 +188,7 @@ export function snapToGrid(sx: number, sy: number, layout: IsoLayout): GridPoint
 }
 
 /**
- * Returns the screen-space bounding diamond for a multi-cell furniture item.
- * The diamond covers all cells from (gx, gy) to (gx + cols, gy + rows).
- * This is essentially a zone diamond for the furniture's footprint.
+ * Screen-space diamond for a multi-cell footprint covering cells (gx, gy) to (gx + cols - 1, gy + rows - 1).
  */
 export function furnitureDiamond(
   gx: number,
@@ -165,42 +206,22 @@ export function furnitureDiamond(
 }
 
 /**
- * Calculates the correct iso-sort depth for a furniture item.
- * Based on the bottom-most occupied cell (highest gx + gy sum)
- * so the item sorts correctly relative to players walking around it.
- *
- * @param gx        Grid column of the top-left cell
- * @param gy        Grid row of the top-left cell
- * @param footprint Resolved (already rotated) footprint [cols, rows]
- * @param depthOffset Extra depth offset from the FurnitureDefinition
- * @returns Depth value for Phaser's setDepth()
+ * Screen bounds of an object standing on a footprint: the footprint diamond extended upward by its height.
+ * `lift` raises the whole object (surface props on a desk).
  */
-export function furnitureDepth(
+export function footprintScreenRect(
   gx: number,
   gy: number,
   footprint: [number, number],
-  depthOffset: number = 0,
-): number {
-  // Bottom-most cell is at (gx + cols - 1, gy + rows - 1)
-  const bottomGx = gx + footprint[0] - 1;
-  const bottomGy = gy + footprint[1] - 1;
-  return 10 + isoDepth(bottomGx, bottomGy) * 2 + depthOffset;
-}
-
-/**
- * Returns the screen center of a furniture item's footprint.
- * Useful for placing labels or selection indicators.
- */
-export function furnitureCenter(
-  gx: number,
-  gy: number,
-  footprint: [number, number],
+  height: number,
   layout: IsoLayout,
-): ScreenPoint {
-  return gridToScreen(
-    gx + footprint[0] / 2,
-    gy + footprint[1] / 2,
-    layout,
-  );
+  lift = 0,
+): ScreenRect {
+  const [top, right, bottom, left] = furnitureDiamond(gx, gy, footprint, layout);
+  return {
+    left: left.sx,
+    right: right.sx,
+    top: top.sy - height - lift,
+    bottom: bottom.sy - lift,
+  };
 }
-
