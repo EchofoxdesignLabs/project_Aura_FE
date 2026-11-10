@@ -1,5 +1,8 @@
 import { socketService } from '@core/services/socket.service';
 import { useGameStore } from '@core/store/game.store';
+import { useMediaStore } from '@core/store/media.store';
+import type { DeskGoToMineResponse, ZoneSnapshot } from '@core/types';
+import { useBuilderStore } from '../../builder/state/builder.store';
 
 export class NetworkManager {
   private lastEmitTime = 0;
@@ -23,6 +26,17 @@ export class NetworkManager {
       useGameStore.getState().updatePlayerPosition(userId, x, y);
     });
 
+    socketService.on('player:avatar-updated', ({ userId, avatarConfig }) => {
+      console.log('[NetworkManager] player:avatar-updated', userId);
+      useGameStore.getState().updatePlayerAvatar(userId, avatarConfig);
+    });
+
+    socketService.on('desk:updated', (zone) => {
+      useGameStore
+        .getState()
+        .updateDeskAssignment(zone.id, zone.assignedUserId, zone.assignedUserName);
+    });
+
     // Zone Events
     socketService.on('zone:entered', (payload) => {
       useGameStore.getState().setCurrentZone({
@@ -33,7 +47,14 @@ export class NetworkManager {
     });
 
     socketService.on('zone:left', () => {
-      useGameStore.getState().setCurrentZone(null);
+      const state = useGameStore.getState();
+      // The backend does not emit a dedicated meeting:leave event to the leaving client.
+      // It only sends zone:left + meeting:peer-left to other participants.
+      // So we must detect and exit meeting mode here.
+      if (state.inMeeting) {
+        state.leaveMeeting();
+      }
+      state.setCurrentZone(null);
     });
 
     // Meeting Events
@@ -48,6 +69,36 @@ export class NetworkManager {
     socketService.on('meeting:peer-left', ({ userId }) => {
       useGameStore.getState().removeMeetingParticipant(userId);
     });
+
+
+    // Screen Share Events
+    socketService.on('screenshare:start', ({ userId }) => {
+      console.log('[NetworkManager] screenshare:start', userId);
+      useMediaStore.getState().addScreenSharingUser(userId);
+    });
+
+    socketService.on('screenshare:stop', ({ userId }) => {
+      console.log('[NetworkManager] screenshare:stop', userId);
+      useMediaStore.getState().removeScreenSharingUser(userId);
+    });
+
+    // Peer Media State Sync
+    socketService.on('media:state', ({ userId, state }) => {
+      useMediaStore.getState().updatePeerMediaState(userId, state);
+    });
+
+    // Furniture Sync Events
+    socketService.on('furniture:placed', (item) => {
+      useBuilderStore.getState().remotePlaceItem(item);
+    });
+
+    socketService.on('furniture:removed', ({ instanceId }) => {
+      useBuilderStore.getState().remoteRemoveItem(instanceId);
+    });
+
+    socketService.on('furniture:moved', ({ instanceId, gridX, gridY, rotation }) => {
+      useBuilderStore.getState().remoteMoveItem(instanceId, gridX, gridY, rotation);
+    });
   }
 
   public emitMove(x: number, y: number): void {
@@ -60,14 +111,65 @@ export class NetworkManager {
     socketService.emit('player:move', { x, y });
   }
 
+  public async assignDesk(zoneId: string, userId?: string): Promise<ZoneSnapshot> {
+    const zone = await socketService.request('desk:assign', {
+      zoneId,
+      ...(userId ? { userId } : {}),
+    });
+    useGameStore.getState().updateDeskAssignment(
+      zone.id,
+      zone.assignedUserId,
+      zone.assignedUserName,
+    );
+    return zone;
+  }
+
+  public async unassignDesk(zoneId: string): Promise<ZoneSnapshot> {
+    const zone = await socketService.request('desk:unassign', { zoneId });
+    useGameStore.getState().updateDeskAssignment(
+      zone.id,
+      zone.assignedUserId,
+      zone.assignedUserName,
+    );
+    return zone;
+  }
+
+  public async goToMyDesk(): Promise<DeskGoToMineResponse> {
+    const response = await socketService.request('desk:go-to-mine', {});
+    useGameStore.getState().updateDeskAssignment(
+      response.zone.id,
+      response.zone.assignedUserId,
+      response.zone.assignedUserName,
+    );
+    useGameStore.getState().setNavigationTarget(response.target);
+    return response;
+  }
+
   public destroy(): void {
+    // Player Events
     socketService.off('player:joined');
     socketService.off('player:left');
     socketService.off('player:moved');
+    socketService.off('desk:updated');
+    
+    // Zone Events
     socketService.off('zone:entered');
     socketService.off('zone:left');
+    
+    // Meeting Events
     socketService.off('meeting:join');
     socketService.off('meeting:peer-joined');
     socketService.off('meeting:peer-left');
+    
+
+    // Screen Share Events
+    socketService.off('screenshare:start');
+    socketService.off('screenshare:stop');
+    socketService.off('media:state');
+
+    // Furniture Events
+    socketService.off('furniture:placed');
+    socketService.off('furniture:removed');
+    socketService.off('furniture:moved');
   }
 }

@@ -4,7 +4,9 @@ import { Button } from '@core/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@core/ui/Card';
 import { Input } from '@core/ui/Input';
 import { apiClient, ApiError } from '@core/api/api.client';
-import { InviteDetails } from '@core/types';
+import type { AvatarConfig, InviteDetails } from '@core/types';
+import { AvatarPicker } from '@spatial/ui/components/AvatarPicker';
+import { buildDefaultAvatarConfig } from '@spatial/utils/avatar-presets';
 
 export function InviteAcceptScreen() {
   const { acceptInvite, error: storeError, clearError, isAuthenticated } = useAuthStore();
@@ -17,6 +19,7 @@ export function InviteAcceptScreen() {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [avatarConfig, setAvatarConfig] = useState<AvatarConfig>(buildDefaultAvatarConfig);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isAccepting, setIsAccepting] = useState(false);
 
@@ -73,7 +76,7 @@ export function InviteAcceptScreen() {
     }
 
     setIsAccepting(true);
-    await acceptInvite(token, name, password);
+    await acceptInvite(token, name, password, avatarConfig);
     setIsAccepting(false);
   }
 
@@ -172,6 +175,14 @@ export function InviteAcceptScreen() {
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="••••••••"
                 />
+
+                {/* Avatar Picker */}
+                <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+                  <label className="mb-3 block text-xs font-medium uppercase tracking-wider text-slate-400">
+                    Choose Your Avatar
+                  </label>
+                  <AvatarPicker value={avatarConfig} onChange={setAvatarConfig} compact />
+                </div>
 
                 <div className="pt-2">
                   <Button type="submit" className="w-full" isLoading={isAccepting}>

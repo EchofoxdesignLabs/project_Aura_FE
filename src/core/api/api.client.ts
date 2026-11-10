@@ -1,6 +1,6 @@
 import { AURA_API_URL } from '@core/config';
 
-type RequestMethod = 'GET' | 'POST';
+type RequestMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
 interface ApiErrorPayload {
   message?: string | string[];
@@ -85,6 +85,14 @@ export class ApiClient {
 
   post<T>(path: string, body?: unknown): Promise<T> {
     return this.request<T>('POST', path, body);
+  }
+
+  patch<T>(path: string, body?: unknown): Promise<T> {
+    return this.request<T>('PATCH', path, body);
+  }
+
+  delete<T>(path: string): Promise<T> {
+    return this.request<T>('DELETE', path);
   }
 
   private async request<T>(method: RequestMethod, path: string, body?: unknown): Promise<T> {

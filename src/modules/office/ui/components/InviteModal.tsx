@@ -26,7 +26,7 @@ export function InviteModal({ open, onClose }: InviteModalProps) {
       if (res && res.inviteUrl) {
          setInviteUrl(res.inviteUrl);
       }
-    } catch (err) {
+    } catch {
       // Error handled by store
     }
   }

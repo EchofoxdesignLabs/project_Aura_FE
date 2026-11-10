@@ -1,9 +1,16 @@
+export interface AvatarConfig {
+  version: 1;
+  presetId: string;
+  paletteId: string;
+}
+
 export interface RegisterCompanyRequest {
   companyName: string;
   companyDomain: string;
   adminEmail: string;
   adminPassword: string;
   adminName: string;
+  avatarConfig?: AvatarConfig;
 }
 
 export interface RegisterCompanyResponse {
@@ -21,7 +28,21 @@ export interface AuthUser {
   name: string;
   role: string;
   company: string;
+  avatarConfig: AvatarConfig;
 }
+
+export interface CompanyUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  companyId: string;
+  company: string;
+  avatarConfig: AvatarConfig;
+  lastOfficeId?: string | null;
+}
+
+export type UpdateAvatarRequest = AvatarConfig;
 
 export interface LoginResponse {
   access_token: string;
@@ -57,10 +78,18 @@ export interface InviteDetails {
 export interface AcceptInviteRequest {
   name: string;
   password: string;
+  avatarConfig?: AvatarConfig;
 }
 
+export interface OfficeLayoutMetadata {
+  layoutMode: string;
+  gridWidth: number;
+  gridHeight: number;
+  tileWidth: number;
+  tileHeight: number;
+}
 
-export interface Office {
+export interface Office extends OfficeLayoutMetadata {
   id: string;
   name: string;
   width: number;
@@ -82,6 +111,10 @@ export interface ZoneSnapshot {
   y: number;
   width: number;
   height: number;
+  anchorX: number | null;
+  anchorY: number | null;
+  assignedUserId: string | null;
+  assignedUserName: string | null;
 }
 
 export interface OfficeWithZones extends Office {
@@ -92,10 +125,12 @@ export interface PlayerState {
   socketId: string;
   userId: string;
   name: string;
+  avatarConfig: AvatarConfig;
   x: number;
   y: number;
   currentZoneId: string | null;
   currentZoneType: string | null;
+  isScreenSharing?: boolean;
 }
 
 export interface OfficeJoinPayload {
@@ -107,9 +142,21 @@ export interface PlayerMovePayload {
   y: number;
 }
 
+export type OfficeStateOffice = Office;
+
+export interface PlacedFurnitureItem {
+  instanceId: string;
+  catalogId: string;
+  gridX: number;
+  gridY: number;
+  rotation: number;
+}
+
 export interface OfficeStatePayload {
   players: PlayerState[];
   zones: ZoneSnapshot[];
+  office: OfficeStateOffice;
+  furniture: PlacedFurnitureItem[];
 }
 
 export interface PlayerLeftPayload {
@@ -146,42 +193,182 @@ export interface MeetingPeerPayload {
   userId: string;
 }
 
-export interface SignalOfferRequest {
-  targetUserId: string;
-  offer: RTCSessionDescriptionInit;
+export interface ScreenSharePayload {
+  userId: string;
 }
 
-export interface SignalAnswerRequest {
-  targetUserId: string;
-  answer: RTCSessionDescriptionInit;
+export interface MediaStatePayload {
+  userId: string;
+  state: {
+    isMicOn?: boolean;
+    isCameraOn?: boolean;
+  };
 }
 
-export interface SignalIceCandidateRequest {
-  targetUserId: string;
-  candidate: RTCIceCandidateInit;
+export interface DeskAssignPayload {
+  zoneId: string;
+  userId?: string;
 }
 
-export interface SignalOfferPayload {
-  fromUserId: string;
-  offer: RTCSessionDescriptionInit;
+export interface DeskUnassignPayload {
+  zoneId: string;
 }
 
-export interface SignalAnswerPayload {
-  fromUserId: string;
-  answer: RTCSessionDescriptionInit;
+export interface DeskGoToMineResponse {
+  zone: ZoneSnapshot;
+  target: {
+    x: number;
+    y: number;
+  };
 }
 
-export interface SignalIceCandidatePayload {
-  fromUserId: string;
-  candidate: RTCIceCandidateInit;
+export type DeskUpdatedPayload = ZoneSnapshot;
+
+export type SfuMediaTag = 'mic' | 'camera' | 'screen';
+
+export type SfuConsumerCloseReason =
+  | 'distance'
+  | 'left-office'
+  | 'left-meeting'
+  | 'producer-closed'
+  | 'receiver-closed'
+  | 'transport-closed'
+  | 'server-cleanup'
+  | 'worker-died';
+
+export interface RemoteUserMedia {
+  mic?: MediaStream;
+  camera?: MediaStream;
+  screen?: MediaStream;
+}
+
+export interface SfuGetRouterRtpCapabilitiesResponse {
+  rtpCapabilities: unknown;
+}
+
+export interface SfuCreateWebRtcTransportRequest {
+  direction: 'send' | 'recv';
+  rtpCapabilities?: unknown;
+}
+
+export interface SfuTransportParameters {
+  id: string;
+  iceParameters: unknown;
+  iceCandidates: unknown[];
+  dtlsParameters: unknown;
+  iceServers?: RTCIceServer[];
+}
+
+export interface SfuConnectTransportRequest {
+  transportId: string;
+  dtlsParameters: unknown;
+}
+
+export interface SfuProduceRequest {
+  transportId: string;
+  kind: 'audio' | 'video';
+  rtpParameters: unknown;
+  appData: {
+    mediaTag: SfuMediaTag;
+  };
+}
+
+export interface SfuProduceResponse {
+  producerId: string;
+}
+
+export interface SfuResumeConsumerRequest {
+  consumerId: string;
+}
+
+export interface SfuCloseProducerRequest {
+  producerId?: string;
+  mediaTag?: SfuMediaTag;
+}
+
+export interface SfuPauseProducerRequest {
+  mediaTag: SfuMediaTag;
+}
+
+export interface SfuResumeProducerRequest {
+  mediaTag: SfuMediaTag;
+}
+
+export interface SfuNewConsumerPayload {
+  consumerId: string;
+  producerId: string;
+  remoteUserId: string;
+  kind: 'audio' | 'video';
+  rtpParameters: unknown;
+  mediaTag: SfuMediaTag;
+}
+
+export interface SfuConsumerClosedPayload {
+  consumerId: string;
+  producerId?: string;
+  remoteUserId?: string;
+  mediaTag: SfuMediaTag;
+  reason: SfuConsumerCloseReason;
+}
+
+export interface SocketRequestEvents {
+  'sfu:get-router-rtp-capabilities': {
+    payload: Record<string, never>;
+    response: SfuGetRouterRtpCapabilitiesResponse;
+  };
+  'sfu:create-webrtc-transport': {
+    payload: SfuCreateWebRtcTransportRequest;
+    response: SfuTransportParameters;
+  };
+  'sfu:connect-transport': {
+    payload: SfuConnectTransportRequest;
+    response: { connected: true };
+  };
+  'sfu:produce': {
+    payload: SfuProduceRequest;
+    response: SfuProduceResponse;
+  };
+  'sfu:resume-consumer': {
+    payload: SfuResumeConsumerRequest;
+    response: { resumed: true };
+  };
+  'sfu:close-producer': {
+    payload: SfuCloseProducerRequest;
+    response: { closed: true };
+  };
+  'sfu:pause-producer': {
+    payload: SfuPauseProducerRequest;
+    response: { paused: true };
+  };
+  'sfu:resume-producer': {
+    payload: SfuResumeProducerRequest;
+    response: { resumed: true };
+  };
+  'desk:assign': {
+    payload: DeskAssignPayload;
+    response: ZoneSnapshot;
+  };
+  'desk:unassign': {
+    payload: DeskUnassignPayload;
+    response: ZoneSnapshot;
+  };
+  'desk:go-to-mine': {
+    payload: Record<string, never>;
+    response: DeskGoToMineResponse;
+  };
 }
 
 export interface SocketClientToServerEvents {
   'office:join': (payload: OfficeJoinPayload) => void;
   'player:move': (payload: PlayerMovePayload) => void;
-  'signal:offer': (payload: SignalOfferRequest) => void;
-  'signal:answer': (payload: SignalAnswerRequest) => void;
-  'signal:ice-candidate': (payload: SignalIceCandidateRequest) => void;
+  'presence:heartbeat': () => void;
+  'screenshare:start': (payload: Record<string, never>) => void;
+  'screenshare:stop': (payload: Record<string, never>) => void;
+  'media:state': (payload: { isMicOn?: boolean; isCameraOn?: boolean }) => void;
+  'player:update-avatar': (payload: { avatarConfig: AvatarConfig }) => void;
+  'furniture:place': (payload: PlacedFurnitureItem) => void;
+  'furniture:remove': (payload: { instanceId: string }) => void;
+  'furniture:move': (payload: { instanceId: string; gridX: number; gridY: number; rotation: number }) => void;
 }
 
 export interface SocketServerToClientEvents {
@@ -196,7 +383,14 @@ export interface SocketServerToClientEvents {
   'meeting:join': (payload: MeetingJoinPayload) => void;
   'meeting:peer-joined': (payload: MeetingPeerPayload) => void;
   'meeting:peer-left': (payload: MeetingPeerPayload) => void;
-  'signal:offer': (payload: SignalOfferPayload) => void;
-  'signal:answer': (payload: SignalAnswerPayload) => void;
-  'signal:ice-candidate': (payload: SignalIceCandidatePayload) => void;
+  'sfu:new-consumer': (payload: SfuNewConsumerPayload) => void;
+  'sfu:consumer-closed': (payload: SfuConsumerClosedPayload) => void;
+  'screenshare:start': (payload: ScreenSharePayload) => void;
+  'screenshare:stop': (payload: ScreenSharePayload) => void;
+  'media:state': (payload: MediaStatePayload) => void;
+  'desk:updated': (payload: DeskUpdatedPayload) => void;
+  'player:avatar-updated': (payload: { userId: string; avatarConfig: AvatarConfig }) => void;
+  'furniture:placed': (payload: PlacedFurnitureItem) => void;
+  'furniture:removed': (payload: { instanceId: string }) => void;
+  'furniture:moved': (payload: { instanceId: string; gridX: number; gridY: number; rotation: number }) => void;
 }

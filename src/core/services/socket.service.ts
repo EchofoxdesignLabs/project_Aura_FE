@@ -1,6 +1,7 @@
 import { AURA_REALTIME_URL } from '@core/config';
 import type {
   SocketClientToServerEvents,
+  SocketRequestEvents,
   SocketServerToClientEvents,
 } from '@core/types';
 import { io, type Socket } from 'socket.io-client';
@@ -69,6 +70,37 @@ export class SocketService {
     this.getSocketOrThrow().emit(event, ...args);
   }
 
+  async request<EventName extends keyof SocketRequestEvents>(
+    event: EventName,
+    payload: SocketRequestEvents[EventName]['payload'],
+    timeoutMs = 10000,
+  ): Promise<SocketRequestEvents[EventName]['response']> {
+    const socket = this.getSocketOrThrow();
+
+    console.log(`[SocketService] requesting ${event}...`);
+
+    return new Promise((resolve, reject) => {
+      // Call emit directly on the timeout object to preserve 'this' context
+      (socket.timeout(timeoutMs).emit as (...args: unknown[]) => void)(
+        event,
+        payload,
+        (
+          error: Error | null,
+          response: SocketRequestEvents[EventName]['response'],
+        ) => {
+          if (error) {
+            console.error(`[SocketService] request ${event} failed:`, error);
+            reject(error);
+            return;
+          }
+
+          console.log(`[SocketService] request ${event} succeeded`);
+          resolve(response);
+        },
+      );
+    });
+  }
+
   on<EventName extends keyof SocketServerToClientEvents>(
     event: EventName,
     handler: SocketServerToClientEvents[EventName],
@@ -80,7 +112,8 @@ export class SocketService {
     event: EventName,
     handler?: SocketServerToClientEvents[EventName],
   ): void {
-    const socket = this.getSocketOrThrow();
+    if (!this.socket) return;
+    const socket = this.socket;
     if (handler) {
       socket.off(event, handler as never);
       return;
