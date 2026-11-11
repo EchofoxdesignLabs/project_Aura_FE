@@ -4,13 +4,35 @@ import { useMediaStore } from '@core/store/media.store';
 import type { DeskGoToMineResponse, ZoneSnapshot } from '@core/types';
 import { useBuilderStore } from '../../builder/state/builder.store';
 
+interface SentPosition {
+  x: number;
+  y: number;
+  seatId: string | null;
+}
+
 export class NetworkManager {
   private lastEmitTime = 0;
-  
+  /** The last position sent to the server; moves equal to it are not resent. */
+  private lastSent: SentPosition | null = null;
+  /** The newest position held back by the throttle, sent when the window ends. */
+  private pendingMove: SentPosition | null = null;
+  private trailingMoveTimer: number | null = null;
+
   // Throttle outbound movement to ~15 updates per second (1000ms / 15 ≈ 66ms)
   private readonly EMIT_INTERVAL = 66;
 
+  /**
+   * Every office:state (first join or a rejoin after reconnect) puts the
+   * server's copy of us at the spawn point, so resend our real position on
+   * the next frame even if we have not moved.
+   */
+  private readonly handleOfficeStateForMovement = (): void => {
+    this.lastSent = null;
+  };
+
   public init(): void {
+    socketService.on('office:state', this.handleOfficeStateForMovement);
+
     // Player Events
     socketService.on('player:joined', (player) => {
       console.log('[NetworkManager] player:joined', player.userId);
@@ -106,14 +128,38 @@ export class NetworkManager {
     });
   }
 
+  /**
+   * Called every frame. Sends only when the position or seat changed, at most
+   * every EMIT_INTERVAL ms, and always sends the final position after the
+   * avatar stops (a throttled last step is sent when the window ends).
+   */
   public emitMove(x: number, y: number, seatId: string | null = null): void {
-    const now = Date.now();
-    if (now - this.lastEmitTime < this.EMIT_INTERVAL) {
+    const latest = this.pendingMove ?? this.lastSent;
+    if (latest && latest.x === x && latest.y === y && latest.seatId === seatId) {
       return;
     }
-    
-    this.lastEmitTime = now;
-    socketService.emit('player:move', { x, y, seatId });
+
+    const waitMs = this.EMIT_INTERVAL - (Date.now() - this.lastEmitTime);
+    if (waitMs > 0) {
+      this.pendingMove = { x, y, seatId };
+      this.trailingMoveTimer ??= window.setTimeout(() => {
+        this.trailingMoveTimer = null;
+        const pending = this.pendingMove;
+        this.pendingMove = null;
+        if (pending) {
+          this.sendMove(pending);
+        }
+      }, waitMs);
+      return;
+    }
+
+    this.sendMove({ x, y, seatId });
+  }
+
+  private sendMove(position: SentPosition): void {
+    this.lastEmitTime = Date.now();
+    this.lastSent = position;
+    socketService.emit('player:move', position);
   }
 
   public async assignDesk(zoneId: string, userId?: string): Promise<ZoneSnapshot> {
@@ -151,6 +197,14 @@ export class NetworkManager {
   }
 
   public destroy(): void {
+    socketService.off('office:state', this.handleOfficeStateForMovement);
+    if (this.trailingMoveTimer !== null) {
+      window.clearTimeout(this.trailingMoveTimer);
+      this.trailingMoveTimer = null;
+    }
+    this.pendingMove = null;
+    this.lastSent = null;
+
     // Player Events
     socketService.off('player:joined');
     socketService.off('player:left');

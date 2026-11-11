@@ -15,7 +15,11 @@ type SfuTransport = mediasoupTypes.Transport;
 type SfuProducer = mediasoupTypes.Producer;
 type SfuConsumer = mediasoupTypes.Consumer;
 
-/** Camera simulcast encodings: low (~180p), medium (~360p), high (~720p) */
+/**
+ * Camera simulcast encodings for the 640×360 capture (CAMERA_CONSTRAINTS in
+ * media.store.ts): 160×90, 320×180 and 640×360. The server picks the layer
+ * each receiver gets (SFU_CAMERA_* in the backend's sfu.constants.ts).
+ */
 const CAMERA_SIMULCAST_ENCODINGS: mediasoupTypes.RtpEncodingParameters[] = [
   { maxBitrate: 100_000, scaleResolutionDownBy: 4 },
   { maxBitrate: 300_000, scaleResolutionDownBy: 2 },
@@ -27,8 +31,19 @@ const SCREEN_ENCODING: mediasoupTypes.RtpEncodingParameters[] = [
   { maxBitrate: 2_000_000 },
 ];
 
+/**
+ * How long a transport may sit in `disconnected` before we restart ICE.
+ * Short blips heal on their own; a network switch (Wi-Fi to mobile, VPN)
+ * does not, and Chrome takes much longer than this to report `failed`.
+ */
+const ICE_DISCONNECTED_GRACE_MS = 3000;
+
 function getUserTagKey(userId: string, mediaTag: SfuMediaTag): string {
   return `${userId}:${mediaTag}`;
+}
+
+function isLiveTrack(track: MediaStreamTrack | undefined): track is MediaStreamTrack {
+  return !!track && track.readyState === 'live';
 }
 
 export class SFUManager {
@@ -38,6 +53,9 @@ export class SFUManager {
   private initializePromise: Promise<void> | null = null;
   private ensureSendTransportPromise: Promise<SfuTransport> | null = null;
   private ensureRecvTransportPromise: Promise<SfuTransport> | null = null;
+  private restartPromise: Promise<void> | null = null;
+  private readonly iceRecoveryTimers = new Map<string, number>();
+  private readonly screenTracksWithEndedListener = new WeakSet<MediaStreamTrack>();
   private readonly producersByTag = new Map<SfuMediaTag, SfuProducer>();
   private readonly consumersById = new Map<string, SfuConsumer>();
   private readonly consumersByUserAndTag = new Map<string, SfuConsumer>();
@@ -178,14 +196,18 @@ export class SFUManager {
     this.producersByTag.set('screen', producer);
     console.log('[SFUManager] screenProducer created:', producer.id);
 
-    // Auto-stop when browser native "Stop sharing" is clicked
-    track.addEventListener('ended', () => {
-      console.log('[SFUManager] Screen track ended (native stop)');
-      this.stopScreenShareProducer().catch((err) => {
-        console.error('[SFUManager] Failed to auto-stop screen share:', err);
+    // Auto-stop when browser native "Stop sharing" is clicked.
+    // Wired once per track: restart() re-produces the same track.
+    if (!this.screenTracksWithEndedListener.has(track)) {
+      this.screenTracksWithEndedListener.add(track);
+      track.addEventListener('ended', () => {
+        console.log('[SFUManager] Screen track ended (native stop)');
+        this.stopScreenShareProducer().catch((err) => {
+          console.error('[SFUManager] Failed to auto-stop screen share:', err);
+        });
+        useMediaStore.getState().stopScreenShare();
       });
-      useMediaStore.getState().stopScreenShare();
-    });
+    }
   }
 
   async stopScreenShareProducer(): Promise<void> {
@@ -273,31 +295,41 @@ export class SFUManager {
     this.audioHandler.setAudioVolume(userId, volume);
   }
 
+  // ─── Recovery ───
+
+  /**
+   * Rebuilds the SFU session from scratch (device, transports, producers) and
+   * re-sends whatever the user is sharing right now.
+   *
+   * Call it after the realtime socket reconnects: the server dropped this
+   * client's SFU peer when the old socket went away (or replaced it on the
+   * new office:join), so the old transports here lead nowhere and media would
+   * stay silent until a page reload. Also the fallback when ICE restart fails.
+   */
+  async restart(): Promise<void> {
+    if (this.restartPromise) {
+      return this.restartPromise;
+    }
+
+    this.restartPromise = (async () => {
+      // Let a first initialization that is still running settle before tearing it down.
+      await this.initializePromise?.catch(() => undefined);
+
+      console.log('[SFUManager] Restarting SFU session');
+      this.resetSession();
+      await this.initialize();
+      await this.republishLocalMedia();
+    })().finally(() => {
+      this.restartPromise = null;
+    });
+
+    return this.restartPromise;
+  }
+
   // ─── Cleanup ───
 
   destroy(): void {
-    // Close all producers
-    for (const [tag, producer] of this.producersByTag) {
-      if (!producer.closed) {
-        producer.close();
-      }
-      console.log(`[SFUManager] Closed producer: ${tag}`);
-    }
-    this.producersByTag.clear();
-
-    // Close all consumers
-    for (const consumerId of this.consumersById.keys()) {
-      this.closeConsumer(consumerId);
-    }
-
-    this.sendTransport?.close();
-    this.recvTransport?.close();
-    this.sendTransport = null;
-    this.recvTransport = null;
-    this.device = null;
-    this.initializePromise = null;
-    this.ensureSendTransportPromise = null;
-    this.ensureRecvTransportPromise = null;
+    this.resetSession();
     this.audioHandler.destroy();
   }
 
@@ -379,6 +411,7 @@ export class SFUManager {
           .catch((error: Error) => errback(error));
       });
 
+      this.watchTransportConnection(transport);
       this.sendTransport = transport;
       return transport;
     })().finally(() => {
@@ -421,6 +454,7 @@ export class SFUManager {
           .catch((error: Error) => errback(error));
       });
 
+      this.watchTransportConnection(transport);
       this.recvTransport = transport;
       return transport;
     })().finally(() => {
@@ -428,6 +462,131 @@ export class SFUManager {
     });
 
     return this.ensureRecvTransportPromise;
+  }
+
+  // ─── Private: Connection Recovery ───
+
+  /**
+   * Restarts ICE when a transport loses its media path (network switch,
+   * laptop wake). That keeps producers and consumers; only if it fails is the
+   * whole session rebuilt.
+   */
+  private watchTransportConnection(transport: SfuTransport): void {
+    transport.on('connectionstatechange', (state) => {
+      if (state === 'connected' || state === 'closed') {
+        this.clearIceRecoveryTimer(transport.id);
+        return;
+      }
+
+      if (state === 'failed') {
+        this.clearIceRecoveryTimer(transport.id);
+        void this.recoverTransport(transport);
+        return;
+      }
+
+      if (state === 'disconnected' && !this.iceRecoveryTimers.has(transport.id)) {
+        const timer = window.setTimeout(() => {
+          this.iceRecoveryTimers.delete(transport.id);
+          if (transport.connectionState === 'disconnected') {
+            void this.recoverTransport(transport);
+          }
+        }, ICE_DISCONNECTED_GRACE_MS);
+        this.iceRecoveryTimers.set(transport.id, timer);
+      }
+    });
+  }
+
+  private async recoverTransport(transport: SfuTransport): Promise<void> {
+    const isCurrent = transport === this.sendTransport || transport === this.recvTransport;
+    if (transport.closed || !isCurrent) {
+      return;
+    }
+
+    // Without a socket there is nobody to ask; the reconnect path calls restart().
+    if (!socketService.isConnected()) {
+      return;
+    }
+
+    try {
+      console.log(`[SFUManager] Restarting ICE on transport ${transport.id}`);
+      const { iceParameters } = await socketService.request('sfu:restart-ice', {
+        transportId: transport.id,
+      });
+      await transport.restartIce({
+        iceParameters: iceParameters as mediasoupTypes.IceParameters,
+      });
+    } catch (error) {
+      console.warn('[SFUManager] ICE restart failed; rebuilding the SFU session:', error);
+      await this.restart().catch((restartError: unknown) => {
+        console.error('[SFUManager] SFU session rebuild failed:', restartError);
+      });
+    }
+  }
+
+  private clearIceRecoveryTimer(transportId: string): void {
+    const timer = this.iceRecoveryTimers.get(transportId);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      this.iceRecoveryTimers.delete(transportId);
+    }
+  }
+
+  // ─── Private: Session Lifecycle ───
+
+  /**
+   * Closes every producer, consumer and transport locally. Nothing is sent to
+   * the server: this runs when the server-side peer is already gone, replaced,
+   * or about to be replaced by new transports.
+   */
+  private resetSession(): void {
+    for (const producer of this.producersByTag.values()) {
+      if (!producer.closed) {
+        producer.close();
+      }
+    }
+    this.producersByTag.clear();
+
+    for (const consumerId of [...this.consumersById.keys()]) {
+      this.closeConsumer(consumerId);
+    }
+
+    for (const timer of this.iceRecoveryTimers.values()) {
+      window.clearTimeout(timer);
+    }
+    this.iceRecoveryTimers.clear();
+
+    this.sendTransport?.close();
+    this.recvTransport?.close();
+    this.sendTransport = null;
+    this.recvTransport = null;
+    this.device = null;
+    this.initializePromise = null;
+    this.ensureSendTransportPromise = null;
+    this.ensureRecvTransportPromise = null;
+  }
+
+  /** Re-produces the tracks the media store says are live and shared. */
+  private async republishLocalMedia(): Promise<void> {
+    const { localStream, isMicOn, isCameraOn, screenStream, isScreenSharing } =
+      useMediaStore.getState();
+
+    const micTrack = localStream?.getAudioTracks()[0];
+    if (isLiveTrack(micTrack)) {
+      await this.startMicProducer(micTrack);
+      if (!isMicOn) {
+        await this.pauseMicProducer();
+      }
+    }
+
+    const cameraTrack = localStream?.getVideoTracks()[0];
+    if (isCameraOn && isLiveTrack(cameraTrack)) {
+      await this.startCameraProducer(cameraTrack);
+    }
+
+    const screenTrack = screenStream?.getVideoTracks()[0];
+    if (isScreenSharing && isLiveTrack(screenTrack)) {
+      await this.startScreenShareProducer(screenTrack);
+    }
   }
 
   // ─── Private: Consumer Lifecycle ───

@@ -5,8 +5,9 @@ import path from 'path';
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  // Base path must be relative for Electron production builds to find assets
-  base: './', 
+  // Absolute so deep links such as /invite/<token> still find /assets/*. Packaged
+  // Electron loads the hosted URL (electron/main.ts), not file://, so './' is not needed.
+  base: '/',
   resolve: {
     alias: {
       '@app': path.resolve(__dirname, './src/app'),
