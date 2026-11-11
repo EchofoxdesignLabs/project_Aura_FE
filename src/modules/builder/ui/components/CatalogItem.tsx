@@ -2,13 +2,14 @@
  * CatalogItem — Individual furniture card in the catalog panel.
  *
  * Shows:
- *   - Isometric thumbnail (generated or loaded)
+ *   - Isometric thumbnail (the art pipeline's 64×64 PNG, or a generated one if it is missing)
  *   - Item name
  *   - Footprint label (e.g., "2×1")
  *   - Selected state highlight
  */
 
-import { useMemo } from 'react';
+import { useState } from 'react';
+import { assetUrl } from '@core/utils/asset-url';
 import type { FurnitureDefinition } from '../../catalog/furniture-catalog';
 import { generateThumbnailDataUrl } from '../../catalog/asset-loader';
 
@@ -19,7 +20,10 @@ interface CatalogItemProps {
 }
 
 export function CatalogItem({ definition, isSelected, onSelect }: CatalogItemProps) {
-  const thumbnailSrc = useMemo(() => generateThumbnailDataUrl(definition), [definition]);
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  const thumbnailSrc = thumbnailFailed
+    ? generateThumbnailDataUrl(definition)
+    : assetUrl(definition.thumbnailUrl);
 
   const [cols, rows] = definition.footprint;
 
@@ -42,8 +46,9 @@ export function CatalogItem({ definition, isSelected, onSelect }: CatalogItemPro
           <img
             src={thumbnailSrc}
             alt={definition.name}
-            className="h-full w-full object-contain"
+            className="h-full w-full object-contain [image-rendering:pixelated]"
             draggable={false}
+            onError={() => setThumbnailFailed(true)}
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center">

@@ -22,8 +22,13 @@ export class NetworkManager {
       useGameStore.getState().removePlayer(userId);
     });
 
-    socketService.on('player:moved', ({ userId, x, y }) => {
-      useGameStore.getState().updatePlayerPosition(userId, x, y);
+    socketService.on('player:moved', ({ userId, x, y, seatId }) => {
+      useGameStore.getState().updatePlayerPosition(userId, x, y, seatId ?? null);
+    });
+
+    // Desk zones follow desk furniture, so placing, moving or removing a desk resends the zones.
+    socketService.on('zones:updated', ({ zones }) => {
+      useGameStore.getState().setZones(zones);
     });
 
     socketService.on('player:avatar-updated', ({ userId, avatarConfig }) => {
@@ -101,14 +106,14 @@ export class NetworkManager {
     });
   }
 
-  public emitMove(x: number, y: number): void {
+  public emitMove(x: number, y: number, seatId: string | null = null): void {
     const now = Date.now();
     if (now - this.lastEmitTime < this.EMIT_INTERVAL) {
       return;
     }
     
     this.lastEmitTime = now;
-    socketService.emit('player:move', { x, y });
+    socketService.emit('player:move', { x, y, seatId });
   }
 
   public async assignDesk(zoneId: string, userId?: string): Promise<ZoneSnapshot> {
@@ -150,6 +155,7 @@ export class NetworkManager {
     socketService.off('player:joined');
     socketService.off('player:left');
     socketService.off('player:moved');
+    socketService.off('zones:updated');
     socketService.off('desk:updated');
     
     // Zone Events

@@ -85,8 +85,15 @@ export interface OfficeLayoutMetadata {
   layoutMode: string;
   gridWidth: number;
   gridHeight: number;
+  /** Stored by the backend; the engine always renders the art's 64 × 32 tiles (see isometric.ts). */
   tileWidth: number;
   tileHeight: number;
+  /**
+   * Tiled map drawn for this office (floors, walls, wall collision): public/assets/maps/<mapKey>.tmj.
+   * null only for offices created before the asset pipeline; the backend moves those onto the default map
+   * when the office list is loaded. A null map draws a plain floor.
+   */
+  mapKey?: string | null;
 }
 
 export interface Office extends OfficeLayoutMetadata {
@@ -130,6 +137,8 @@ export interface PlayerState {
   y: number;
   currentZoneId: string | null;
   currentZoneType: string | null;
+  /** The chair (furniture instanceId) the player sits on; null or absent when standing. */
+  seatId?: string | null;
   isScreenSharing?: boolean;
 }
 
@@ -140,6 +149,13 @@ export interface OfficeJoinPayload {
 export interface PlayerMovePayload {
   x: number;
   y: number;
+  /** The chair the player sits on, null when standing. */
+  seatId: string | null;
+}
+
+/** The office's zone list after desk zones followed a desk being placed, moved or removed. */
+export interface ZonesUpdatedPayload {
+  zones: ZoneSnapshot[];
 }
 
 export type OfficeStateOffice = Office;
@@ -167,6 +183,7 @@ export interface PlayerMovedPayload {
   userId: string;
   x: number;
   y: number;
+  seatId?: string | null;
 }
 
 export interface ZoneEnteredPayload {
@@ -376,6 +393,7 @@ export interface SocketServerToClientEvents {
   'player:joined': (payload: PlayerState) => void;
   'player:left': (payload: PlayerLeftPayload) => void;
   'player:moved': (payload: PlayerMovedPayload) => void;
+  'zones:updated': (payload: ZonesUpdatedPayload) => void;
   'zone:entered': (payload: ZoneEnteredPayload) => void;
   'zone:left': (payload: ZoneLeftPayload) => void;
   'zone:player-entered': (payload: ZonePlayerPayload) => void;

@@ -1,103 +1,122 @@
 /**
  * OccupancyGrid — Pure-logic 2D grid tracking cell occupancy.
  *
- * No Phaser dependency. No Zustand dependency. Fully serializable to JSON.
+ * No Phaser dependency. No Zustand dependency.
  *
- * Each cell stores either:
- *   - null: the cell is free
- *   - string: the instanceId of the furniture item occupying it
+ * Two layers, each cell holding null (free) or the instanceId occupying it:
+ *   - floor:   ordinary furniture
+ *   - surface: surface items (monitors, R-26) standing on a host's top
  *
- * The grid dimensions match the office grid (24 cols × 18 rows for default).
- * Per design decision: no sub-grid — 1:1 mapping to isometric tiles.
+ * A surface item may share cells with a host (an item with `surfaceHeight`, e.g. a desk) or stand on empty
+ * floor. A floor item may not cover a cell holding a surface item unless it is itself a host.
+ *
+ * The grid dimensions match the office grid (24 cols × 18 rows for default). 1:1 mapping to isometric tiles.
  */
 
 import type { PlacedFurnitureItem } from '../catalog/furniture-catalog';
-import { getRotatedFootprint, getCellsOccupied } from '../catalog/furniture-catalog';
+import { getRotatedFootprint, getCellsOccupied, isSurfaceItem } from '../catalog/furniture-catalog';
 import { getCatalogItem } from '../catalog/default-catalog';
 
-export class OccupancyGrid {
-  private grid: (string | null)[][];
+type Layer = (string | null)[][];
 
-  constructor(
-    public readonly cols: number,
-    public readonly rows: number,
-  ) {
-    this.grid = OccupancyGrid.createEmptyGrid(cols, rows);
+export class OccupancyGrid {
+  readonly cols: number;
+  readonly rows: number;
+  private floor: Layer;
+  private surface: Layer;
+  /** Placed items that surface items may stand on (definition has surfaceHeight). */
+  private hostIds = new Set<string>();
+
+  constructor(cols: number, rows: number) {
+    this.cols = cols;
+    this.rows = rows;
+    this.floor = OccupancyGrid.createEmptyLayer(cols, rows);
+    this.surface = OccupancyGrid.createEmptyLayer(cols, rows);
   }
 
   // ─── Queries ───
 
-  /** Check if a furniture item can be placed at (gx, gy) with the given footprint. */
+  /**
+   * Can an item of `catalogId` be placed at (gx, gy) with the given (rotated) footprint?
+   * `excludeInstanceId` ignores the item being moved or rotated.
+   */
   canPlace(
     gx: number,
     gy: number,
     footprint: [number, number],
+    catalogId: string,
     excludeInstanceId?: string,
   ): boolean {
-    const cells = getCellsOccupied(gx, gy, footprint);
-    for (const cell of cells) {
-      // Bounds check
-      if (cell.gx < 0 || cell.gx >= this.cols || cell.gy < 0 || cell.gy >= this.rows) {
-        return false;
-      }
-      // Occupancy check
-      const occupant = this.grid[cell.gy][cell.gx];
-      if (occupant !== null && occupant !== excludeInstanceId) {
-        return false;
+    const definition = getCatalogItem(catalogId);
+    if (!definition) return false;
+    const surfaceItem = isSurfaceItem(definition);
+    const isHost = (definition.surfaceHeight ?? 0) > 0;
+    const free = (id: string | null) => id === null || id === excludeInstanceId;
+
+    for (const cell of getCellsOccupied(gx, gy, footprint)) {
+      if (!this.isInBounds(cell.gx, cell.gy)) return false;
+      const floorId = this.floor[cell.gy][cell.gx];
+      const surfaceId = this.surface[cell.gy][cell.gx];
+
+      if (surfaceItem) {
+        if (!free(surfaceId)) return false;
+        if (!free(floorId) && !this.isHostId(floorId)) return false;
+      } else {
+        if (!free(floorId)) return false;
+        if (!free(surfaceId) && !isHost) return false;
       }
     }
     return true;
   }
 
-  /** Get the instanceId at a specific cell, or null if empty. */
+  /** The floor item at a cell (null if none or out of bounds). */
   getAt(gx: number, gy: number): string | null {
-    if (gx < 0 || gx >= this.cols || gy < 0 || gy >= this.rows) {
-      return null;
-    }
-    return this.grid[gy][gx];
+    return this.isInBounds(gx, gy) ? this.floor[gy][gx] : null;
   }
 
-  /** Check if a cell is within grid bounds. */
+  /** The top-most item at a cell: a surface item if there is one, otherwise the floor item. */
+  getTopAt(gx: number, gy: number): string | null {
+    if (!this.isInBounds(gx, gy)) return null;
+    return this.surface[gy][gx] ?? this.floor[gy][gx];
+  }
+
   isInBounds(gx: number, gy: number): boolean {
     return gx >= 0 && gx < this.cols && gy >= 0 && gy < this.rows;
   }
 
   // ─── Mutations ───
 
-  /** Place an item — marks all occupied cells with the instanceId. */
   place(item: PlacedFurnitureItem): void {
     const definition = getCatalogItem(item.catalogId);
     if (!definition) return;
 
+    const layer = isSurfaceItem(definition) ? this.surface : this.floor;
+    if ((definition.surfaceHeight ?? 0) > 0) this.hostIds.add(item.instanceId);
     const rotated = getRotatedFootprint(definition.footprint, item.rotation);
-    const cells = getCellsOccupied(item.gridX, item.gridY, rotated);
-
-    for (const cell of cells) {
-      if (cell.gx >= 0 && cell.gx < this.cols && cell.gy >= 0 && cell.gy < this.rows) {
-        this.grid[cell.gy][cell.gx] = item.instanceId;
+    for (const cell of getCellsOccupied(item.gridX, item.gridY, rotated)) {
+      if (this.isInBounds(cell.gx, cell.gy)) {
+        layer[cell.gy][cell.gx] = item.instanceId;
       }
     }
   }
 
-  /** Remove an item — clears all cells occupied by this instanceId. */
   remove(instanceId: string): void {
-    for (let row = 0; row < this.rows; row++) {
-      for (let col = 0; col < this.cols; col++) {
-        if (this.grid[row][col] === instanceId) {
-          this.grid[row][col] = null;
+    this.hostIds.delete(instanceId);
+    for (const layer of [this.floor, this.surface]) {
+      for (const row of layer) {
+        for (let col = 0; col < row.length; col++) {
+          if (row[col] === instanceId) row[col] = null;
         }
       }
     }
   }
 
-  /** Clear the entire grid. */
   clear(): void {
-    this.grid = OccupancyGrid.createEmptyGrid(this.cols, this.rows);
+    this.floor = OccupancyGrid.createEmptyLayer(this.cols, this.rows);
+    this.surface = OccupancyGrid.createEmptyLayer(this.cols, this.rows);
+    this.hostIds.clear();
   }
 
-  // ─── Bulk operations ───
-
-  /** Rebuild the grid from a list of placed items. */
   rebuildFrom(items: PlacedFurnitureItem[]): void {
     this.clear();
     for (const item of items) {
@@ -105,48 +124,13 @@ export class OccupancyGrid {
     }
   }
 
-  // ─── Serialization ───
-
-  /** Serialize the grid to a compact JSON object. */
-  serialize(): OccupancyGridSnapshot {
-    // Only store non-null cells to minimize payload
-    const occupied: { gx: number; gy: number; instanceId: string }[] = [];
-    for (let row = 0; row < this.rows; row++) {
-      for (let col = 0; col < this.cols; col++) {
-        const id = this.grid[row][col];
-        if (id !== null) {
-          occupied.push({ gx: col, gy: row, instanceId: id });
-        }
-      }
-    }
-    return { cols: this.cols, rows: this.rows, occupied };
-  }
-
-  /** Restore from a serialized snapshot. */
-  static deserialize(snapshot: OccupancyGridSnapshot): OccupancyGrid {
-    const grid = new OccupancyGrid(snapshot.cols, snapshot.rows);
-    for (const cell of snapshot.occupied) {
-      if (
-        cell.gx >= 0 && cell.gx < snapshot.cols &&
-        cell.gy >= 0 && cell.gy < snapshot.rows
-      ) {
-        grid.grid[cell.gy][cell.gx] = cell.instanceId;
-      }
-    }
-    return grid;
-  }
-
   // ─── Internal ───
 
-  private static createEmptyGrid(cols: number, rows: number): (string | null)[][] {
+  private isHostId(instanceId: string | null): boolean {
+    return instanceId !== null && this.hostIds.has(instanceId);
+  }
+
+  private static createEmptyLayer(cols: number, rows: number): Layer {
     return Array.from({ length: rows }, () => Array.from({ length: cols }, () => null));
   }
-}
-
-// ─── Serialization Types ───
-
-export interface OccupancyGridSnapshot {
-  cols: number;
-  rows: number;
-  occupied: { gx: number; gy: number; instanceId: string }[];
 }

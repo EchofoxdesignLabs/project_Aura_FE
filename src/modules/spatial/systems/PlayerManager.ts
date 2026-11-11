@@ -1,104 +1,68 @@
 import Phaser from 'phaser';
 import { useGameStore } from '@core/store/game.store';
 import { PlayerSprite } from '../entities/PlayerSprite';
-import { gridToScreen, type IsoLayout } from '../utils/isometric';
+import { gridToScreen, screenToGrid, type IsoLayout } from '../utils/isometric';
 import type { AvatarConfig } from '@core/types';
+import type { DepthSorter } from './DepthSorter';
+import type { SeatPose } from '../../builder/entities/FurnitureSprite';
+
+/** Looks up how to sit on a seat (a chair's instanceId), or null if it is gone or not a seat. */
+export type SeatResolver = (seatId: string) => SeatPose | null;
 
 export class PlayerManager {
   private scene: Phaser.Scene;
+  private layout: IsoLayout;
+  private sorter: DepthSorter;
   public sprites: Map<string, PlayerSprite> = new Map();
   public localPlayer: PlayerSprite | null = null;
   private unsubPlayers!: () => void;
+  private resolveSeat: SeatResolver = () => null;
 
-  constructor(scene: Phaser.Scene) {
+  constructor(scene: Phaser.Scene, layout: IsoLayout, sorter: DepthSorter) {
     this.scene = scene;
+    this.layout = layout;
+    this.sorter = sorter;
   }
 
-  private get isoLayout(): IsoLayout | undefined {
-    return (this.scene as unknown as { isoLayout?: IsoLayout }).isoLayout;
+  /** Seats come from the furniture, which is created after the players. */
+  public setSeatResolver(resolver: SeatResolver): void {
+    this.resolveSeat = resolver;
   }
 
   public init(): void {
     const state = useGameStore.getState();
     const localId = state.localPlayerId;
-    const layout = this.isoLayout;
 
-    // 1. Spawn Initial Players from Snapshot
+    // 1. Spawn initial players from the snapshot (grid → screen).
     Object.values(state.players).forEach((player) => {
-      // Backend sends grid coordinates; convert to screen for rendering
-      let screenX = player.x;
-      let screenY = player.y;
-      if (layout) {
-        const sp = gridToScreen(player.x, player.y, layout);
-        screenX = sp.sx;
-        screenY = sp.sy;
-      }
-
-      this.spawnPlayer(
-        player.userId,
-        player.name,
-        screenX,
-        screenY,
-        player.userId === localId,
-        player.avatarConfig,
-      );
+      const sp = gridToScreen(player.x, player.y, this.layout);
+      this.spawnPlayer(player.userId, player.name, sp.sx, sp.sy, player.userId === localId, player.avatarConfig);
     });
 
-    // 2. Subscribe to Zustand player changes
+    // 2. Follow store changes.
     this.unsubPlayers = useGameStore.subscribe(
       (currentState) => currentState.players,
       (newPlayers, prevPlayers) => {
-        const localId2 = useGameStore.getState().localPlayerId;
+        const currentLocalId = useGameStore.getState().localPlayerId;
 
-        // Handle new players and movement
         Object.values(newPlayers).forEach((p) => {
-          const isLocal = p.userId === localId2;
-          
           const sprite = this.sprites.get(p.userId);
-          if (sprite) {
-            // Update avatar if changed
-            if (p.avatarConfig && prevPlayers[p.userId]?.avatarConfig?.presetId !== p.avatarConfig.presetId) {
-              sprite.updateAvatarConfig(p.avatarConfig);
-            }
+          if (sprite && p.avatarConfig && prevPlayers[p.userId]?.avatarConfig?.presetId !== p.avatarConfig.presetId) {
+            sprite.updateAvatarConfig(p.avatarConfig);
           }
 
-          if (isLocal) return; // Local physics/movement runs independently
+          if (p.userId === currentLocalId) return; // local movement runs independently
 
-          if (!prevPlayers[p.userId]) {
-            // New player appeared — convert grid → screen
-            let sx = p.x;
-            let sy = p.y;
-            if (layout) {
-              const sp = gridToScreen(p.x, p.y, layout);
-              sx = sp.sx;
-              sy = sp.sy;
-            }
-            this.spawnPlayer(p.userId, p.name, sx, sy, false, p.avatarConfig);
+          const sp = gridToScreen(p.x, p.y, this.layout);
+          if (!prevPlayers[p.userId] || !sprite) {
+            this.spawnPlayer(p.userId, p.name, sp.sx, sp.sy, false, p.avatarConfig);
           } else {
-            // Existing player moved — convert grid → screen
-            let sx = p.x;
-            let sy = p.y;
-            if (layout) {
-              const sp = gridToScreen(p.x, p.y, layout);
-              sx = sp.sx;
-              sy = sp.sy;
-            }
-            const sprite = this.sprites.get(p.userId);
-            if (sprite) {
-              sprite.setTargetPosition(sx, sy);
-              // Update avatar if changed
-              if (p.avatarConfig && prevPlayers[p.userId]?.avatarConfig?.presetId !== p.avatarConfig.presetId) {
-                sprite.updateAvatarConfig(p.avatarConfig);
-              }
-            }
+            sprite.setTargetPosition(sp.sx, sp.sy);
           }
         });
 
-        // Handle players who left
         Object.keys(prevPlayers).forEach((userId) => {
-          if (!newPlayers[userId]) {
-            this.removePlayer(userId);
-          }
+          if (!newPlayers[userId]) this.removePlayer(userId);
         });
       },
     );
@@ -112,14 +76,11 @@ export class PlayerManager {
     isLocal: boolean,
     avatarConfig?: AvatarConfig,
   ): void {
+    if (this.sprites.has(userId)) return;
     const sprite = new PlayerSprite(this.scene, userId, name, x, y, isLocal, avatarConfig);
-    // Set initial depth based on Y position
-    sprite.setDepth(10 + y);
     this.sprites.set(userId, sprite);
-
-    if (isLocal) {
-      this.localPlayer = sprite;
-    }
+    this.sortSprite(sprite);
+    if (isLocal) this.localPlayer = sprite;
   }
 
   private removePlayer(userId: string): void {
@@ -130,16 +91,38 @@ export class PlayerManager {
     }
   }
 
+  /**
+   * Interpolates remote players, seats whoever has a seatId (between the seat's base and front layers),
+   * depth-sorts everyone else and keeps name tags in place.
+   */
   public update(delta: number): void {
+    const zoom = this.scene.cameras.main.zoom;
+    const players = useGameStore.getState().players;
     this.sprites.forEach((sprite) => {
-      if (sprite !== this.localPlayer) {
-        sprite.update(delta);
+      const seatId = players[sprite.userId]?.seatId ?? null;
+      const seat = seatId ? this.resolveSeat(seatId) : null;
+      if (seat) {
+        sprite.sitAt(seat.x, seat.y, seat.facing);
+        sprite.setDepth(seat.depth);
+      } else {
+        // Remote players stand up where they are and walk on from the next network position.
+        sprite.standUp();
+        if (sprite !== this.localPlayer) sprite.update(delta);
+        this.sortSprite(sprite);
       }
-      // Update depth for local player too
-      if (sprite === this.localPlayer) {
-        sprite.setDepth(10 + sprite.y);
-      }
+      sprite.syncOverlay(zoom);
     });
+
+    // R-35: tall furniture in front of your own avatar fades.
+    if (this.localPlayer) {
+      const g = screenToGrid(this.localPlayer.x, this.localPlayer.y, this.layout);
+      this.sorter.updateFades(g.gx, g.gy, this.localPlayer.getFadeRect());
+    }
+  }
+
+  private sortSprite(sprite: PlayerSprite): void {
+    const g = screenToGrid(sprite.x, sprite.y, this.layout);
+    sprite.setDepth(this.sorter.depthForActor(g.gx, g.gy, sprite.getBodyRect()));
   }
 
   public destroy(): void {

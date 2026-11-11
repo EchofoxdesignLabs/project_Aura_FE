@@ -1,38 +1,55 @@
 /**
  * FurnitureSprite — Visual representation of a placed furniture item.
  *
- * A Phaser Container that renders:
- *   1. The furniture sprite (from texture atlas or placeholder)
+ * A Phaser Container placed on the footprint's top tip (gridToScreen(gridX, gridY)), holding:
+ *   1. The item's image: one, or the base layer for seats, from its sprite sheet or a placeholder
  *   2. A selection outline (shown in edit mode on hover/select)
- *   3. A collision body (for items with blocksMovement: true)
  *
- * Depth-sorted using the isometric formula based on the item's
- * bottom-most grid cell. Players walk in front of and behind
- * furniture correctly.
+ * A seat's front layer (R-24) lives in its own container just above this one in depth, so a seated avatar
+ * can be drawn between the two (SEAT_AVATAR_DEPTH < SEAT_FRONT_DEPTH).
+ *
+ * FurnitureManager owns depth (sort keys), surface lift and occluder registration; this class only draws.
  */
 
 import Phaser from 'phaser';
 import type { FurnitureDefinition, PlacedFurnitureItem } from '../catalog/furniture-catalog';
 import { getRotatedFootprint } from '../catalog/furniture-catalog';
-import {
-  gridToScreen,
-  furnitureDiamond,
-  furnitureDepth,
-  furnitureCenter,
-  type IsoLayout,
-} from '../../spatial/utils/isometric';
+import { SEAT_FACING, seatOffset, type FurnitureArt } from '../catalog/furniture-art';
+import { createFurnitureImages } from './furniture-visual';
+import { furnitureDiamond, gridToScreen, type IsoLayout } from '../../spatial/utils/isometric';
+
+const FADED_ALPHA = 0.4;
+/** Depth above the seat's base for a seated avatar, and for the seat's front layer. Below FurnitureManager's tie-break step. */
+export const SEAT_AVATAR_DEPTH = 0.0003;
+export const SEAT_FRONT_DEPTH = 0.0006;
+
+export interface SeatPose {
+  /** Screen position for the avatar's feet. */
+  x: number;
+  y: number;
+  /** Grid position of the seat's cell centre (sent over the network). */
+  gx: number;
+  gy: number;
+  facing: 'se' | 'sw' | 'nw' | 'ne';
+  /** Depth that draws the avatar between the seat's base and front. */
+  depth: number;
+}
 
 export class FurnitureSprite extends Phaser.GameObjects.Container {
   public readonly instanceId: string;
   public readonly catalogId: string;
 
-  private sprite: Phaser.GameObjects.Sprite;
-  private selectionGraphics: Phaser.GameObjects.Graphics;
-  private definition: FurnitureDefinition;
-  private currentGridX: number;
-  private currentGridY: number;
-  private currentRotation: number;
-  private layout: IsoLayout;
+  private images: Phaser.GameObjects.Image[] = [];
+  /** Seats only: holds the front layer, drawn over a seated avatar. */
+  private frontLayer: Phaser.GameObjects.Container | null = null;
+  private art!: FurnitureArt;
+  private readonly selectionGraphics: Phaser.GameObjects.Graphics;
+  private readonly definition: FurnitureDefinition;
+  private readonly layout: IsoLayout;
+  private gridX: number;
+  private gridY: number;
+  private itemRotation: number;
+  private lift = 0;
   private isHighlighted = false;
   private isSelected = false;
 
@@ -42,60 +59,33 @@ export class FurnitureSprite extends Phaser.GameObjects.Container {
     definition: FurnitureDefinition,
     layout: IsoLayout,
   ) {
-    // Calculate screen position from grid position
-    const footprint = getRotatedFootprint(definition.footprint, item.rotation);
-    const center = furnitureCenter(item.gridX, item.gridY, footprint, layout);
-
-    super(scene, center.sx, center.sy);
+    super(scene, 0, 0);
 
     this.instanceId = item.instanceId;
     this.catalogId = item.catalogId;
     this.definition = definition;
-    this.currentGridX = item.gridX;
-    this.currentGridY = item.gridY;
-    this.currentRotation = item.rotation;
     this.layout = layout;
+    this.gridX = item.gridX;
+    this.gridY = item.gridY;
+    this.itemRotation = item.rotation;
 
-    // 1. Create the furniture sprite
-    this.sprite = scene.add.sprite(0, 0, definition.textureKey);
+    this.selectionGraphics = scene.add.graphics().setVisible(false);
+    this.add(this.selectionGraphics);
+    this.buildImages();
+    this.reposition();
 
-    // Apply rotation via angle
-    if (item.rotation !== 0) {
-      this.sprite.setAngle(item.rotation);
-    }
-
-    // Scale sprite to roughly match the footprint on the isometric grid
-    const targetW = (footprint[0] + footprint[1]) * (layout.tileWidth / 2);
-    const targetH = (footprint[0] + footprint[1]) * (layout.tileHeight / 2);
-    if (this.sprite.width > 0 && this.sprite.height > 0) {
-      this.sprite.setDisplaySize(targetW * 0.85, targetH * 0.85);
-    }
-
-    // Apply anchor offset
-    this.sprite.setPosition(
-      definition.anchorOffset.x,
-      definition.anchorOffset.y,
-    );
-
-    // 2. Create selection outline graphics (hidden by default)
-    this.selectionGraphics = scene.add.graphics();
-    this.selectionGraphics.setVisible(false);
-    this.drawSelectionOutline();
-
-    // 3. Add to container
-    this.add([this.selectionGraphics, this.sprite]);
-
-    // 4. Set depth (iso-sort)
-    const depth = furnitureDepth(item.gridX, item.gridY, footprint, definition.depthOffset);
-    this.setDepth(depth);
-
-    // 5. Add to scene
     scene.add.existing(this);
+  }
 
-    // 6. Create collision body if needed
-    if (definition.blocksMovement) {
-      this.createCollisionBody(scene, item.gridX, item.gridY, footprint, layout);
-    }
+  /** Moves/rotates the item. `lift` raises surface items onto their host (art px). */
+  setPlacement(gridX: number, gridY: number, rotation: number, lift: number): void {
+    const rotated = rotation !== this.itemRotation;
+    this.gridX = gridX;
+    this.gridY = gridY;
+    this.itemRotation = rotation;
+    this.lift = lift;
+    if (rotated) this.buildImages();
+    this.reposition();
   }
 
   /** Highlight this item when hovered in edit mode. */
@@ -112,114 +102,114 @@ export class FurnitureSprite extends Phaser.GameObjects.Container {
     this.updateSelectionVisuals();
   }
 
-  /** Update position after a move operation. */
-  updateGridPosition(newGx: number, newGy: number, layout: IsoLayout): void {
-    this.currentGridX = newGx;
-    this.currentGridY = newGy;
-    this.layout = layout;
-
-    const footprint = getRotatedFootprint(this.definition.footprint, this.currentRotation);
-    const center = furnitureCenter(newGx, newGy, footprint, layout);
-
-    this.setPosition(center.sx, center.sy);
-
-    const depth = furnitureDepth(newGx, newGy, footprint, this.definition.depthOffset);
-    this.setDepth(depth);
-
-    this.drawSelectionOutline();
+  /** R-35: fade while it hides the local avatar. */
+  setFaded(faded: boolean): void {
+    this.setAlpha(faded ? FADED_ALPHA : 1);
+    this.frontLayer?.setAlpha(faded ? FADED_ALPHA : 1);
   }
 
-  /** Get the current grid position. */
+  /** Sets the depth of the item and of its front layer, if it has one. */
+  setDepth(value: number): this {
+    super.setDepth(value);
+    this.frontLayer?.setDepth(value + SEAT_FRONT_DEPTH);
+    return this;
+  }
+
+  /** Where and how to sit on this item, or null if it is not a seat. */
+  getSeatPose(): SeatPose | null {
+    const offset = seatOffset(this.art, this.itemRotation);
+    if (!offset) return null;
+    const normalized = ((this.itemRotation % 360) + 360) % 360;
+    return {
+      x: this.x + offset.dx,
+      y: this.y + offset.dy,
+      gx: this.gridX + 0.5,
+      gy: this.gridY + 0.5,
+      facing: SEAT_FACING[normalized] ?? 'se',
+      depth: this.depth + SEAT_AVATAR_DEPTH,
+    };
+  }
+
+  /** True if the drawn art covers this world point (bounding boxes, for clicks). */
+  containsPoint(worldX: number, worldY: number): boolean {
+    return this.images.some((image) => image.getBounds().contains(worldX, worldY));
+  }
+
   getGridPosition(): { gx: number; gy: number } {
-    return { gx: this.currentGridX, gy: this.currentGridY };
+    return { gx: this.gridX, gy: this.gridY };
   }
 
-  /** Get the current rotation. */
   getRotation(): number {
-    return this.currentRotation;
+    return this.itemRotation;
+  }
+
+  getFootprint(): [number, number] {
+    return getRotatedFootprint(this.definition.footprint, this.itemRotation);
+  }
+
+  /** Art height in pixels (floor to top), from the manifest. */
+  getArtHeight(): number {
+    return this.art.height;
+  }
+
+  isDecal(): boolean {
+    return this.art.decal;
   }
 
   // ─── Internal ───
 
+  public destroy(fromScene?: boolean): void {
+    this.frontLayer?.destroy(fromScene);
+    this.frontLayer = null;
+    super.destroy(fromScene);
+  }
+
+  private buildImages(): void {
+    this.images.forEach((image) => image.destroy());
+    this.frontLayer?.destroy();
+    this.frontLayer = null;
+
+    const { images, art } = createFurnitureImages(this.scene, this.definition, this.itemRotation);
+    this.images = images;
+    this.art = art;
+    if (images.length > 1) {
+      // Seat: base in this container, front layer in its own one above it.
+      this.add(images.slice(0, -1));
+      this.frontLayer = this.scene.add.container(this.x, this.y, [images[images.length - 1]]);
+      this.frontLayer.setDepth(this.depth + SEAT_FRONT_DEPTH).setAlpha(this.alpha);
+    } else {
+      this.add(images);
+    }
+    this.bringToTop(this.selectionGraphics);
+    this.updateSelectionVisuals();
+  }
+
+  private reposition(): void {
+    const tip = gridToScreen(this.gridX, this.gridY, this.layout);
+    this.setPosition(tip.sx, tip.sy - this.lift);
+    this.frontLayer?.setPosition(this.x, this.y);
+    this.drawSelectionOutline();
+  }
+
   private updateSelectionVisuals(): void {
     this.selectionGraphics.setVisible(this.isHighlighted || this.isSelected);
-
-    if (this.isSelected) {
-      this.sprite.setAlpha(0.9);
-      this.sprite.setTint(0x60a5fa); // Blue tint for selected
-    } else if (this.isHighlighted) {
-      this.sprite.setAlpha(0.95);
-      this.sprite.clearTint();
-    } else {
-      this.sprite.setAlpha(1);
-      this.sprite.clearTint();
+    for (const image of this.images) {
+      if (this.isSelected) {
+        image.setTint(0x60a5fa);
+      } else {
+        image.clearTint();
+      }
     }
   }
 
   private drawSelectionOutline(): void {
+    const diamond = furnitureDiamond(this.gridX, this.gridY, this.getFootprint(), this.layout);
+    const points = diamond.map((p) => new Phaser.Math.Vector2(p.sx - this.x, p.sy - this.y - this.lift));
+
     this.selectionGraphics.clear();
-
-    const footprint = getRotatedFootprint(this.definition.footprint, this.currentRotation);
-    const diamond = furnitureDiamond(
-      this.currentGridX,
-      this.currentGridY,
-      footprint,
-      this.layout,
-    );
-
-    // Convert diamond points to local coordinates (relative to this container)
-    const centerScreen = furnitureCenter(
-      this.currentGridX,
-      this.currentGridY,
-      footprint,
-      this.layout,
-    );
-
-    // Selection outline — dashed blue border
-    this.selectionGraphics.lineStyle(2, 0x60a5fa, 0.8);
-    this.selectionGraphics.beginPath();
-    const localPoints = diamond.map((p) => ({
-      x: p.sx - centerScreen.sx,
-      y: p.sy - centerScreen.sy,
-    }));
-    this.selectionGraphics.moveTo(localPoints[0].x, localPoints[0].y);
-    for (let i = 1; i < localPoints.length; i++) {
-      this.selectionGraphics.lineTo(localPoints[i].x, localPoints[i].y);
-    }
-    this.selectionGraphics.closePath();
-    this.selectionGraphics.strokePath();
-  }
-
-  private createCollisionBody(
-    scene: Phaser.Scene,
-    gx: number,
-    gy: number,
-    footprint: [number, number],
-    layout: IsoLayout,
-  ): void {
-    // Create an invisible rectangle at the screen position with a static body
-    const topLeft = gridToScreen(gx, gy, layout);
-    const bottomRight = gridToScreen(gx + footprint[0], gy + footprint[1], layout);
-    const width = Math.abs(bottomRight.sx - topLeft.sx);
-    const height = Math.abs(bottomRight.sy - topLeft.sy);
-
-    // Use a zone for collision detection (simpler than a full sprite)
-    const center = furnitureCenter(gx, gy, footprint, layout);
-    const collisionZone = scene.add.zone(center.sx, center.sy, width, height);
-    scene.physics.add.existing(collisionZone, true); // static body
-
-    // Store reference for cleanup
-    (this as unknown as Record<string, unknown>)._collisionZone = collisionZone;
-  }
-
-  destroy(fromScene?: boolean): void {
-    // Clean up collision zone if it exists
-    const collisionZone = (this as unknown as Record<string, unknown>)._collisionZone as
-      | Phaser.GameObjects.Zone
-      | undefined;
-    if (collisionZone) {
-      collisionZone.destroy();
-    }
-    super.destroy(fromScene);
+    this.selectionGraphics.fillStyle(0x60a5fa, 0.15);
+    this.selectionGraphics.fillPoints(points, true);
+    this.selectionGraphics.lineStyle(2, 0x60a5fa, 0.9);
+    this.selectionGraphics.strokePoints(points, true);
   }
 }

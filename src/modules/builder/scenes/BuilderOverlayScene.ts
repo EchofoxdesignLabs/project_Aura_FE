@@ -14,18 +14,21 @@
 import Phaser from 'phaser';
 import { useBuilderStore } from '../state/builder.store';
 import type { FurnitureDefinition } from '../catalog/furniture-catalog';
-import { getRotatedFootprint, getCellsOccupied } from '../catalog/furniture-catalog';
+import { getRotatedFootprint, getCellsOccupied, isSurfaceItem } from '../catalog/furniture-catalog';
+import { getCatalogItem } from '../catalog/default-catalog';
+import { createFurnitureImages } from '../entities/furniture-visual';
 import {
   snapToGrid,
   tileDiamond,
   furnitureDiamond,
-  furnitureCenter,
+  gridToScreen,
   type IsoLayout,
   type ScreenPoint,
 } from '../../spatial/utils/isometric';
 
 export class BuilderOverlayScene extends Phaser.Scene {
-  private ghostSprite: Phaser.GameObjects.Sprite | null = null;
+  private ghostSprite: Phaser.GameObjects.Container | null = null;
+  private ghostImages: Phaser.GameObjects.Image[] = [];
   private cellHighlights!: Phaser.GameObjects.Graphics;
   private gridOverlay!: Phaser.GameObjects.Graphics;
   private isoLayout!: IsoLayout;
@@ -48,17 +51,8 @@ export class BuilderOverlayScene extends Phaser.Scene {
   }
 
   create(): void {
-    // Match the camera bounds to the OfficeScene
-    const officeScene = this.scene.get('OfficeScene');
-    if (officeScene) {
-      const cam = officeScene.cameras.main;
-      this.cameras.main.setBounds(
-        cam.getBounds().x,
-        cam.getBounds().y,
-        cam.getBounds().width,
-        cam.getBounds().height,
-      );
-    }
+    // This camera mirrors the OfficeScene camera (see syncCamera), so it needs no bounds of its own.
+    this.cameras.main.removeBounds();
 
     // Create graphics layers
     this.gridOverlay = this.add.graphics();
@@ -124,21 +118,12 @@ export class BuilderOverlayScene extends Phaser.Scene {
       this.ghostSprite = null;
     }
 
-    this.ghostSprite = this.add.sprite(0, 0, definition.textureKey);
+    // Same art, anchor and mirroring as the placed item (see FurnitureSprite).
+    const { images } = createFurnitureImages(this, definition, rotation);
+    this.ghostImages = images;
+    this.ghostSprite = this.add.container(0, 0, images);
     this.ghostSprite.setAlpha(0.6);
     this.ghostSprite.setDepth(600);
-
-    // Scale to match footprint
-    const footprint = getRotatedFootprint(definition.footprint, rotation);
-    const targetW = (footprint[0] + footprint[1]) * (this.isoLayout.tileWidth / 2);
-    const targetH = (footprint[0] + footprint[1]) * (this.isoLayout.tileHeight / 2);
-    if (this.ghostSprite.width > 0 && this.ghostSprite.height > 0) {
-      this.ghostSprite.setDisplaySize(targetW * 0.85, targetH * 0.85);
-    }
-
-    if (rotation !== 0) {
-      this.ghostSprite.setAngle(rotation);
-    }
 
     // Force position update on next frame
     this.lastGhostGx = -1;
@@ -154,8 +139,9 @@ export class BuilderOverlayScene extends Phaser.Scene {
     const offCam = officeScene.cameras.main;
     const myCam = this.cameras.main;
 
-    myCam.setScroll(offCam.scrollX, offCam.scrollY);
     myCam.setZoom(offCam.zoom);
+    myCam.setRoundPixels(offCam.roundPixels);
+    myCam.setScroll(offCam.scrollX, offCam.scrollY);
   }
 
   private updateGhostVisuals(
@@ -182,11 +168,11 @@ export class BuilderOverlayScene extends Phaser.Scene {
 
     const footprint = getRotatedFootprint(definition.footprint, rotation);
 
-    // 1. Position the ghost sprite
+    // 1. Position the ghost on the footprint's top tip (lifted onto a desk for surface items)
     if (this.ghostSprite) {
-      const center = furnitureCenter(gx, gy, footprint, this.isoLayout);
-      this.ghostSprite.setPosition(center.sx, center.sy);
-      this.ghostSprite.setTint(isValid ? 0x22c55e : 0xef4444);
+      const tip = gridToScreen(gx, gy, this.isoLayout);
+      this.ghostSprite.setPosition(tip.sx, tip.sy - this.surfaceLift(definition, gx, gy));
+      for (const image of this.ghostImages) image.setTint(isValid ? 0x22c55e : 0xef4444);
     }
 
     // 2. Draw cell highlights
@@ -217,10 +203,20 @@ export class BuilderOverlayScene extends Phaser.Scene {
     this.cellHighlights.strokePath();
   }
 
+  /** How far a surface item would be lifted at (gx, gy): its host's surfaceHeight, or 0. */
+  private surfaceLift(definition: FurnitureDefinition, gx: number, gy: number): number {
+    if (!isSurfaceItem(definition)) return 0;
+    const state = useBuilderStore.getState();
+    const hostId = state.getOccupancyGrid().getAt(gx, gy);
+    const host = hostId ? state.placedItems.find((item) => item.instanceId === hostId) : undefined;
+    return (host && getCatalogItem(host.catalogId)?.surfaceHeight) || 0;
+  }
+
   private clearGhost(): void {
     if (this.ghostSprite) {
       this.ghostSprite.destroy();
       this.ghostSprite = null;
+      this.ghostImages = [];
     }
     this.cellHighlights.clear();
     this.lastGhostGx = -1;
