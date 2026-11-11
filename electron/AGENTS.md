@@ -9,6 +9,9 @@
   `base: './'` keeps asset paths relative for `file://`.
 - Security: `nodeIntegration: false`, `contextIsolation: true`, and no preload script yet. If the renderer ever needs native
   APIs, add a preload with a narrow `contextBridge` API. Never enable `nodeIntegration`.
+- Screen share: Electron rejects `getDisplayMedia()` unless the main process answers it, so `registerScreenShareHandler()`
+  sets `session.defaultSession.setDisplayMediaRequestHandler`. macOS shows the native picker; Windows and Linux share the
+  primary screen. An in-app picker (windows and screens from `desktopCapturer`) is a later improvement.
 
 ## Known issues
 

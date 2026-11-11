@@ -76,6 +76,13 @@ export function GameContainer() {
           state.office.gridWidth,
           state.office.gridHeight,
         );
+
+        // This socket is a new session for the server: it dropped the old SFU
+        // peer (or replaced it on this join), so the transports we still hold
+        // lead nowhere. Rebuild them now that the join has completed.
+        sfuManager.restart().catch((error) => {
+          console.warn('[GameContainer] SFU rebuild after reconnect failed:', error);
+        });
       };
 
       clearPendingOfficeStateListener = () => {

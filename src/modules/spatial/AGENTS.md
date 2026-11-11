@@ -7,7 +7,8 @@ over the canvas.
 
 1. Creates the `Phaser.Game` with `OfficeScene`. The scene then adds and launches `BuilderOverlayScene` itself.
 2. On every socket connect, it emits `office:join` and applies `office:state` to the game store, and loads `state.furniture` into the
-   builder store (`loadLayout`).
+   builder store (`loadLayout`). After that rejoin it calls `sfuManager.restart()`: the new socket is a new SFU session on the
+   server, so the old transports are dead and media must be rebuilt.
 3. Sends `presence:heartbeat` every 15 s. The server TTL is 30 s.
 4. Initializes `sfuManager` and media (`initMedia`). Tears everything down on unmount.
 5. Renders `HUD`, plus `BuilderToolbar`, `CatalogPanel`, `ProximityIndicator` and `MeetingOverlay` once the engine is ready.
@@ -22,7 +23,7 @@ over the canvas.
 | `systems/DepthSorter.ts` | Furniture and wall tiles register occluders (grid box, sort key, screen rect). Avatar depth is solved against the occluders it overlaps, so people sort correctly beside long desks and behind glass. Also fades tall furniture that hides your own avatar (R-35). |
 | `systems/CameraController.ts` | Zoom steps 3×, 2×, 1× (default) and ½× from the mouse wheel or + / −, whole-pixel rounding, and bounds that centre a small office (R-06 to R-09). Dragging pans (left or middle button in play mode, middle only in edit mode) and stops following; walking resumes following. Play-mode clicks fire on release and are ignored after a drag (`DRAG_THRESHOLD`). |
 | `systems/InputManager.ts` | WASD and arrow keys produce screen-space velocity (`AVATAR_WALK_SPEED`, 200 px/s). Two keys move along a tile edge (2:1), not at 45° (R-17). |
-| `systems/NetworkManager.ts` | Registers every `socketService.on` listener (`player:*`, `zone:*`, `meeting:*`, `screenshare:*`, `media:state`, `desk:updated`, `zones:updated`, `furniture:*`) and routes the payloads into stores. `emitMove` is throttled to about 15 Hz. It also has the ack helpers `assignDesk`, `unassignDesk` and `goToMyDesk`, and `destroy()` removes all listeners. |
+| `systems/NetworkManager.ts` | Registers every `socketService.on` listener (`player:*`, `zone:*`, `meeting:*`, `screenshare:*`, `media:state`, `desk:updated`, `zones:updated`, `furniture:*`) and routes the payloads into stores. `emitMove` is called every frame but sends only when the position or seat changed, at most about 15 Hz, with a trailing send so the final position always arrives; each `office:state` clears the last-sent position so the next frame resends it. It also has the ack helpers `assignDesk`, `unassignDesk` and `goToMyDesk`, and `destroy()` removes all listeners. |
 | `systems/PlayerManager.ts` | Syncs the `players` in the store to `PlayerSprite`s, placing them with `gridToScreen`. Remote players interpolate toward `setTargetPosition`, and the local player moves on its own. Anyone whose `seatId` resolves to a seat (`FurnitureManager.getSeat`) is pinned to the seat point in the sit pose, at a depth between the seat's base and front layers. |
 | `systems/ProximitySystem.ts` | Every 500 ms it sets the volume of each remote user: full within 1.5 tiles, fading out to zero at 6 tiles. This only adjusts volume, because the server decides which streams arrive. |
 | `systems/MeetingSystem.ts` | While in a meeting, it stops proximity and sets participants to full volume. |

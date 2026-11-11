@@ -281,6 +281,14 @@ export interface SfuConnectTransportRequest {
   dtlsParameters: unknown;
 }
 
+export interface SfuRestartIceRequest {
+  transportId: string;
+}
+
+export interface SfuRestartIceResponse {
+  iceParameters: unknown;
+}
+
 export interface SfuProduceRequest {
   transportId: string;
   kind: 'audio' | 'video';
@@ -340,6 +348,10 @@ export interface SocketRequestEvents {
   'sfu:connect-transport': {
     payload: SfuConnectTransportRequest;
     response: { connected: true };
+  };
+  'sfu:restart-ice': {
+    payload: SfuRestartIceRequest;
+    response: SfuRestartIceResponse;
   };
   'sfu:produce': {
     payload: SfuProduceRequest;

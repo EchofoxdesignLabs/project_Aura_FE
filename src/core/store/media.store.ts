@@ -47,6 +47,18 @@ function createInitialMediaData(): MediaStoreData {
   };
 }
 
+/**
+ * Webcam capture. Video tiles are small, so 360p at 24 fps is plenty, and it
+ * caps both upload and what the SFU forwards. The simulcast layers in
+ * sfu.manager.ts are derived from this size. `ideal` lets cameras that cannot
+ * do it exactly pick the nearest mode instead of failing.
+ */
+const CAMERA_CONSTRAINTS: MediaTrackConstraints = {
+  width: { ideal: 640 },
+  height: { ideal: 360 },
+  frameRate: { ideal: 24, max: 24 },
+};
+
 function stopStreamTracks(stream: MediaStream | null | undefined): void {
   stream?.getTracks().forEach((track) => {
     track.stop();
@@ -75,7 +87,7 @@ export const useMediaStore = create<MediaState>()((set, get) => ({
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
-        video: true,
+        video: CAMERA_CONSTRAINTS,
       });
     } catch {
       // Camera denied or unavailable — try audio only
@@ -89,7 +101,7 @@ export const useMediaStore = create<MediaState>()((set, get) => ({
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             audio: false,
-            video: true,
+            video: CAMERA_CONSTRAINTS,
           });
         } catch {
           // Both denied — proceed with no media
@@ -176,7 +188,7 @@ export const useMediaStore = create<MediaState>()((set, get) => ({
       } else {
         // Turn camera on — acquire a new video track and start camera producer
         navigator.mediaDevices
-          .getUserMedia({ video: true, audio: false })
+          .getUserMedia({ video: CAMERA_CONSTRAINTS, audio: false })
           .then(async (cameraStream) => {
             const newVideoTrack = cameraStream.getVideoTracks()[0];
             if (!newVideoTrack) return;
