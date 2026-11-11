@@ -127,3 +127,17 @@ export function resolveFurnitureView(art: FurnitureArt, rotation: number): Furni
   const anchorX = flipX ? width - art.anchor[0] : art.anchor[0];
   return { frames, flipX, originX: anchorX / width, originY: art.anchor[1] / height };
 }
+
+/** Which way someone sitting on a seat faces, per rotation (0° = view-se, so the sitter faces se). */
+export const SEAT_FACING: Record<number, 'se' | 'sw' | 'nw' | 'ne'> = { 0: 'se', 90: 'sw', 180: 'nw', 270: 'ne' };
+
+/**
+ * Where a seated avatar's feet go, relative to the footprint's top tip (screen px at 1×), or null when the
+ * item is not a seat. Uses the manifest's `seat` point and mirrors it with the art.
+ */
+export function seatOffset(art: FurnitureArt, rotation: number): { dx: number; dy: number } | null {
+  if (!art.seat) return null;
+  const { flipX } = resolveFurnitureView(art, rotation);
+  const dx = art.seat[0] - art.anchor[0];
+  return { dx: flipX ? -dx : dx, dy: art.seat[1] - art.anchor[1] };
+}

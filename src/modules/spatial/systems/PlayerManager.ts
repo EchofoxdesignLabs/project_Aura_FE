@@ -4,6 +4,10 @@ import { PlayerSprite } from '../entities/PlayerSprite';
 import { gridToScreen, screenToGrid, type IsoLayout } from '../utils/isometric';
 import type { AvatarConfig } from '@core/types';
 import type { DepthSorter } from './DepthSorter';
+import type { SeatPose } from '../../builder/entities/FurnitureSprite';
+
+/** Looks up how to sit on a seat (a chair's instanceId), or null if it is gone or not a seat. */
+export type SeatResolver = (seatId: string) => SeatPose | null;
 
 export class PlayerManager {
   private scene: Phaser.Scene;
@@ -12,11 +16,17 @@ export class PlayerManager {
   public sprites: Map<string, PlayerSprite> = new Map();
   public localPlayer: PlayerSprite | null = null;
   private unsubPlayers!: () => void;
+  private resolveSeat: SeatResolver = () => null;
 
   constructor(scene: Phaser.Scene, layout: IsoLayout, sorter: DepthSorter) {
     this.scene = scene;
     this.layout = layout;
     this.sorter = sorter;
+  }
+
+  /** Seats come from the furniture, which is created after the players. */
+  public setSeatResolver(resolver: SeatResolver): void {
+    this.resolveSeat = resolver;
   }
 
   public init(): void {
@@ -81,12 +91,25 @@ export class PlayerManager {
     }
   }
 
-  /** Interpolates remote players, depth-sorts everyone and keeps name tags in place. */
+  /**
+   * Interpolates remote players, seats whoever has a seatId (between the seat's base and front layers),
+   * depth-sorts everyone else and keeps name tags in place.
+   */
   public update(delta: number): void {
     const zoom = this.scene.cameras.main.zoom;
+    const players = useGameStore.getState().players;
     this.sprites.forEach((sprite) => {
-      if (sprite !== this.localPlayer) sprite.update(delta);
-      this.sortSprite(sprite);
+      const seatId = players[sprite.userId]?.seatId ?? null;
+      const seat = seatId ? this.resolveSeat(seatId) : null;
+      if (seat) {
+        sprite.sitAt(seat.x, seat.y, seat.facing);
+        sprite.setDepth(seat.depth);
+      } else {
+        // Remote players stand up where they are and walk on from the next network position.
+        sprite.standUp();
+        if (sprite !== this.localPlayer) sprite.update(delta);
+        this.sortSprite(sprite);
+      }
       sprite.syncOverlay(zoom);
     });
 

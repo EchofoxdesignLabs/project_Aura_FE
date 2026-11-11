@@ -38,7 +38,9 @@ export interface GameState extends GameStoreData {
   setLocalPlayerId: (id: string | null) => void;
   addPlayer: (player: PlayerState) => void;
   removePlayer: (userId: string) => void;
-  updatePlayerPosition: (userId: string, x: number, y: number) => void;
+  /** `seatId` undefined leaves the player's seat as it is. */
+  updatePlayerPosition: (userId: string, x: number, y: number, seatId?: string | null) => void;
+  setZones: (zones: ZoneSnapshot[]) => void;
   updatePlayerAvatar: (userId: string, avatarConfig: AvatarConfig) => void;
   setAllPlayers: (players: PlayerState[]) => void;
   setSelectedDeskZoneId: (zoneId: string | null) => void;
@@ -122,7 +124,7 @@ export const useGameStore = create<GameState>()(
           ),
         };
       }),
-    updatePlayerPosition: (userId, x, y) =>
+    updatePlayerPosition: (userId, x, y, seatId) =>
       set((state) => {
         const existingPlayer = state.players[userId];
         if (!existingPlayer) {
@@ -136,10 +138,12 @@ export const useGameStore = create<GameState>()(
               ...existingPlayer,
               x,
               y,
+              ...(seatId !== undefined ? { seatId } : {}),
             },
           },
         };
       }),
+    setZones: (zones) => set(() => ({ zones })),
     updatePlayerAvatar: (userId, avatarConfig) =>
       set((state) => {
         const existingPlayer = state.players[userId];

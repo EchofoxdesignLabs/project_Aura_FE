@@ -19,6 +19,8 @@ import {
 const REMOTE_MOVING_THRESHOLD = 12;
 /** Keep walking this long after the last movement, so 15 Hz network updates don't flicker to idle. */
 const REMOTE_IDLE_DELAY_MS = 180;
+/** The head is this much lower in the sit pose (art px), so the name tag follows it down. */
+const SEATED_HEAD_DROP = 6;
 
 /**
  * PlayerSprite — one avatar in the world.
@@ -46,6 +48,8 @@ export class PlayerSprite extends Phaser.GameObjects.Container {
 
   private facing: Facing = 's';
   private action: AvatarAction = 'idle';
+  /** Set while sitting: the feet are pinned to the seat and the sit pose plays. */
+  private seated = false;
   private lastMovedAt = 0;
   private prevX: number;
   private prevY: number;
@@ -137,6 +141,7 @@ export class PlayerSprite extends Phaser.GameObjects.Container {
    * @param speed              screen px/s actually moved (0 when blocked)
    */
   public setMotion(intentVx: number, intentVy: number, speed: number): void {
+    if (this.seated) return;
     const facing = facingFromVelocity(intentVx, intentVy);
     if (facing) this.facing = facing;
     this.setAction(speed > 1 ? 'walk' : 'idle', speed);
@@ -144,7 +149,7 @@ export class PlayerSprite extends Phaser.GameObjects.Container {
 
   /** Remote players: interpolate toward the network target and animate from the movement. */
   public update(delta: number): void {
-    if (this.isLocal) return;
+    if (this.isLocal || this.seated) return;
 
     const lerpFactor = 1 - Math.pow(0.85, delta / 16.67); // ≈ 0.15 per 60 Hz frame
     this.x = Phaser.Math.Linear(this.x, this.targetX, lerpFactor);
@@ -167,10 +172,40 @@ export class PlayerSprite extends Phaser.GameObjects.Container {
     }
   }
 
+  /**
+   * Sits with the feet on a seat point, facing the seat's way. Cheap to call every frame: it only restarts
+   * the pose when something changed. The shadow hides, because the seat is under the avatar.
+   */
+  public sitAt(x: number, y: number, facing: Facing): void {
+    this.setPosition(x, y);
+    this.targetX = x;
+    this.targetY = y;
+    this.prevX = x;
+    this.prevY = y;
+    if (this.seated && this.facing === facing) return;
+    this.seated = true;
+    this.facing = facing;
+    this.shadow.setVisible(false);
+    this.setAction('sit', 0);
+  }
+
+  /** Leaves the seat and stands idle where it is (the caller moves it off the seat if needed). */
+  public standUp(): void {
+    if (!this.seated) return;
+    this.seated = false;
+    this.shadow.setVisible(true);
+    this.setAction('idle', 0);
+  }
+
+  public isSeated(): boolean {
+    return this.seated;
+  }
+
   /** Keeps the name tag over the head and at constant screen size. Call every frame after moving. */
   public syncOverlay(zoom: number): void {
     const scale = 1 / zoom;
-    this.tag.setPosition(this.x, this.y - AVATAR_HEAD_HEIGHT - 4);
+    const head = this.seated ? AVATAR_HEAD_HEIGHT - SEATED_HEAD_DROP : AVATAR_HEAD_HEIGHT;
+    this.tag.setPosition(this.x, this.y - head - 4);
     this.tag.setScale(scale);
   }
 

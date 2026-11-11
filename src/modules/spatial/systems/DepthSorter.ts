@@ -70,7 +70,7 @@ export class DepthSorter {
     let upper = Infinity; // must draw before these keys
 
     this.forEachOverlapping(rect, (occluder) => {
-      const relation = classify(actor, occluder.box);
+      const relation = classifyBoxes(actor, occluder.box);
       if (relation === 'front') lower = Math.max(lower, occluder.key);
       else if (relation === 'behind') upper = Math.min(upper, occluder.key);
     });
@@ -89,7 +89,7 @@ export class DepthSorter {
     const nowFaded = new Set<Occluder>();
 
     this.forEachOverlapping(rect, (occluder) => {
-      if (occluder.setFade && classify(actor, occluder.box) === 'behind') nowFaded.add(occluder);
+      if (occluder.setFade && classifyBoxes(actor, occluder.box) === 'behind') nowFaded.add(occluder);
     });
 
     for (const occluder of this.faded) {
@@ -117,7 +117,7 @@ export class DepthSorter {
  *   'behind' — a lies before b on some grid axis
  *   null     — they overlap on the floor, or are separated sideways on screen (no ordering needed)
  */
-function classify(a: GridBox, b: GridBox): 'front' | 'behind' | null {
+export function classifyBoxes(a: GridBox, b: GridBox): 'front' | 'behind' | null {
   const inFront = b.x1 <= a.x0 || b.y1 <= a.y0;
   const behind = a.x1 <= b.x0 || a.y1 <= b.y0;
   if (inFront && !behind) return 'front';

@@ -218,8 +218,9 @@ export function GameContainer() {
       sfuManager.destroy();
       stopMedia();
       
-      // Reset builder store
-      useBuilderStore.getState().reset();
+      // Leave edit mode but keep the layout: it belongs to the office, not to this mount
+      // (StrictMode remounts in dev, and only a join or reconnect delivers office:state).
+      useBuilderStore.getState().exitEditMode();
       
       if (gameRef.current) {
         gameRef.current.destroy(true);

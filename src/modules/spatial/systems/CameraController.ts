@@ -7,9 +7,25 @@ import Phaser from 'phaser';
  *     with the mouse wheel or the + / − keys.
  *   - Positions are rounded to whole pixels so pixel art does not shimmer while walking.
  *   - When the office is smaller than the screen, the bounds are padded so it sits centred.
+ *   - Dragging with the middle button (or the left one, when `canDragWithLeft` allows) pans the camera
+ *     and stops following the avatar; `resumeFollow` (called when the avatar moves) glides back to it.
  */
 export const ZOOM_STEPS = [0.5, 1, 2, 3] as const;
 export const DEFAULT_ZOOM = 1;
+/** A press that moves less than this (screen px) is a click, not a drag. */
+export const DRAG_THRESHOLD = 6;
+
+const FOLLOW_LERP = 0.15;
+const LEFT_BUTTON = 0;
+const MIDDLE_BUTTON = 1;
+
+interface DragState {
+  startX: number;
+  startY: number;
+  scrollX: number;
+  scrollY: number;
+  active: boolean;
+}
 
 export class CameraController {
   private readonly scene: Phaser.Scene;
@@ -17,16 +33,35 @@ export class CameraController {
   private readonly world: { width: number; height: number };
   private zoomIndex: number = ZOOM_STEPS.indexOf(DEFAULT_ZOOM);
   private readonly keys: Phaser.Input.Keyboard.Key[] = [];
+  private readonly canDragWithLeft: () => boolean;
+  private followTarget: (Phaser.GameObjects.GameObject & { x: number; y: number }) | null = null;
+  private following = false;
+  private drag: DragState | null = null;
+  private readonly preventMiddleClickScroll = (event: MouseEvent) => {
+    if (event.button === MIDDLE_BUTTON) event.preventDefault();
+  };
 
-  constructor(scene: Phaser.Scene, worldWidth: number, worldHeight: number) {
+  constructor(
+    scene: Phaser.Scene,
+    worldWidth: number,
+    worldHeight: number,
+    canDragWithLeft: () => boolean = () => true,
+  ) {
     this.scene = scene;
     this.camera = scene.cameras.main;
     this.world = { width: worldWidth, height: worldHeight };
+    this.canDragWithLeft = canDragWithLeft;
 
     this.camera.setRoundPixels(true);
     this.applyZoom();
 
     scene.input.on('wheel', this.onWheel, this);
+    scene.input.on('pointerdown', this.onPointerDown, this);
+    scene.input.on('pointermove', this.onPointerMove, this);
+    scene.input.on('pointerup', this.onPointerUp, this);
+    scene.input.on('pointerupoutside', this.onPointerUp, this);
+    // The browser's middle-click autoscroll would fight the pan.
+    scene.game.canvas.addEventListener('mousedown', this.preventMiddleClickScroll);
     scene.scale.on(Phaser.Scale.Events.RESIZE, this.updateBounds, this);
 
     const keyboard = scene.input.keyboard;
@@ -44,7 +79,15 @@ export class CameraController {
   }
 
   follow(target: Phaser.GameObjects.GameObject & { x: number; y: number }): void {
-    this.camera.startFollow(target, true, 0.15, 0.15);
+    this.followTarget = target;
+    this.following = true;
+    this.camera.startFollow(target, true, FOLLOW_LERP, FOLLOW_LERP);
+  }
+
+  /** After a pan: glide back to the followed target. Cheap to call every frame. */
+  resumeFollow(): void {
+    if (this.following || !this.followTarget || this.drag?.active) return;
+    this.follow(this.followTarget);
   }
 
   step(direction: 1 | -1): void {
@@ -56,6 +99,11 @@ export class CameraController {
 
   destroy(): void {
     this.scene.input.off('wheel', this.onWheel, this);
+    this.scene.input.off('pointerdown', this.onPointerDown, this);
+    this.scene.input.off('pointermove', this.onPointerMove, this);
+    this.scene.input.off('pointerup', this.onPointerUp, this);
+    this.scene.input.off('pointerupoutside', this.onPointerUp, this);
+    this.scene.game.canvas?.removeEventListener('mousedown', this.preventMiddleClickScroll);
     this.scene.scale.off(Phaser.Scale.Events.RESIZE, this.updateBounds, this);
     for (const key of this.keys) key.removeAllListeners();
   }
@@ -69,6 +117,42 @@ export class CameraController {
       this.step(direction);
     });
     this.keys.push(key);
+  }
+
+  private onPointerDown(pointer: Phaser.Input.Pointer): void {
+    const canDrag =
+      pointer.button === MIDDLE_BUTTON || (pointer.button === LEFT_BUTTON && this.canDragWithLeft());
+    this.drag = canDrag
+      ? {
+          startX: pointer.x,
+          startY: pointer.y,
+          scrollX: this.camera.scrollX,
+          scrollY: this.camera.scrollY,
+          active: false,
+        }
+      : null;
+  }
+
+  private onPointerMove(pointer: Phaser.Input.Pointer): void {
+    const drag = this.drag;
+    if (!drag) return;
+    if (!pointer.isDown) {
+      this.drag = null;
+      return;
+    }
+    const dx = pointer.x - drag.startX;
+    const dy = pointer.y - drag.startY;
+    if (!drag.active) {
+      if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+      drag.active = true;
+      this.camera.stopFollow();
+      this.following = false;
+    }
+    this.camera.setScroll(drag.scrollX - dx / this.zoom, drag.scrollY - dy / this.zoom);
+  }
+
+  private onPointerUp(): void {
+    this.drag = null;
   }
 
   private onWheel(_pointer: Phaser.Input.Pointer, _over: unknown, _dx: number, dy: number): void {

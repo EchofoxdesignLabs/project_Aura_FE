@@ -29,7 +29,7 @@ join/reconnect: GameContainer → loadLayout(state.furniture, gridWidth, gridHei
 | `state/builder-actions.ts` | Place, remove, move and rotate actions, plus `invertAction` for undo. |
 | `utils/placement-validator.ts` | Bounds and overlap validation, returning a reason code. |
 | `scenes/BuilderOverlayScene.ts` | Phaser scene launched on top of `OfficeScene` in edit mode. Handles the ghost preview, grid highlight and pointer input. |
-| `systems/FurnitureManager.ts` | Turns store state into `FurnitureSprite`s. On every change it lifts surface items onto their host, sets sort keys (decals at the bottom), registers `DepthSorter` occluders and reports the layout so `OfficeScene` can update collision. |
+| `systems/FurnitureManager.ts` | Turns store state into `FurnitureSprite`s. On every change it lifts surface items onto their host, sets sort keys (decals at the bottom), registers `DepthSorter` occluders and reports the layout so `OfficeScene` can update collision. Sort keys start from the footprint's front tip; items that overlap on screen are then put in footprint order (topological sort), so a long divider never draws over the desk in front of it. |
 | `entities/FurnitureSprite.ts`, `entities/furniture-visual.ts` | Container on the footprint's top tip holding the item's images (base and front for seats), with highlight, selection and fade. The builder ghost uses the same `createFurnitureImages`. |
 | `ui/BuilderToolbar.tsx`, `ui/CatalogPanel.tsx`, `ui/components/CatalogItem.tsx` | React UI: tools, rotate, undo, redo, exit, and the category catalog. |
 
@@ -39,6 +39,11 @@ join/reconnect: GameContainer → loadLayout(state.furniture, gridWidth, gridHei
   has already changed. When you harden this, switch to `socketService.request` (acks) and revert on error.
 - `instanceId` is a client-generated UUID that becomes the DB primary key.
 - Furniture with `blocksMovement` blocks avatars through `CollisionGrid`. Surface items never block.
+- Seats: items whose manifest entry has a `seat` point (chairs) can be sat on. `FurnitureSprite.getSeatPose()` gives the feet
+  position, facing (0° se, 90° sw, 180° nw, 270° ne) and depth. The seat's front layer is a separate container just above
+  the base, so the avatar draws between them.
+- Desks are claimable because the backend gives every desk item its own desk zone (backend `desk-zones.ts`). A new desk
+  catalog id must also be added to the backend's `DESK_FOOTPRINTS`.
 - Removing a host leaves its surface items standing on the floor.
 - A new catalog item needs a matching manifest entry and sheet from Aura_Assets. Without one it renders as a placeholder box.
 - The backend also exposes `PUT /office/:id/furniture` for bulk save, which is unused. A "Save/Discard" flow would use it, and needs

@@ -6,7 +6,7 @@ import { InputManager } from '../systems/InputManager';
 import { NetworkManager } from '../systems/NetworkManager';
 import { PlayerManager } from '../systems/PlayerManager';
 import { DepthSorter } from '../systems/DepthSorter';
-import { CameraController } from '../systems/CameraController';
+import { CameraController, DRAG_THRESHOLD } from '../systems/CameraController';
 import { CollisionDebugOverlay } from '../systems/CollisionDebugOverlay';
 import type { CollisionGrid } from '../systems/CollisionGrid';
 import { preloadOfficeMap, renderOfficeMap } from '../systems/OfficeMapRenderer';
@@ -45,7 +45,16 @@ import { BuilderOverlayScene } from '../../builder/scenes/BuilderOverlayScene';
 const AVATAR_RADIUS = 0.25;
 /** "Go to my desk" gives up if the avatar makes no progress for this long. */
 const NAV_STUCK_MS = 1500;
+/** Sit once this close (grid units) to the seat's cell centre. */
+const SIT_REACH = 0.3;
+/** E sits on the nearest free seat within this distance (grid units). */
+const SIT_KEY_RANGE = 1.6;
+/** A navigation target this close to a free seat ("go to my desk") ends sitting on it. */
+const SEAT_NEAR_TARGET = 1.2;
 const DEFAULT_BACKGROUND = '#2b2f3a';
+/** Debug panel's screen position: left edge of the HUD, under the zone badge. */
+const DEBUG_PANEL_X = 16;
+const DEBUG_PANEL_Y = 64;
 
 interface NavigationState {
   target: GridPoint;
@@ -74,6 +83,9 @@ export class OfficeScene extends Phaser.Scene {
   private screenLabels: Phaser.GameObjects.Text[] = [];
   private deskHoverGraphics!: Phaser.GameObjects.Graphics;
   private navigation: NavigationState | null = null;
+  /** The seat the local player sits on, and the one it is walking to. */
+  private localSeatId: string | null = null;
+  private pendingSeatId: string | null = null;
   private unsubscribers: (() => void)[] = [];
 
   constructor() {
@@ -134,6 +146,7 @@ export class OfficeScene extends Phaser.Scene {
       this.updateFurnitureCollision(items),
     );
     this.furnitureManager.init();
+    this.playerManager.setSeatResolver((seatId) => this.furnitureManager.getSeat(seatId));
 
     // 6. Builder overlay scene (starts sleeping)
     const overlayData = { isoLayout: this.isoLayout, gridCols: meta.gridWidth, gridRows: meta.gridHeight };
@@ -143,7 +156,13 @@ export class OfficeScene extends Phaser.Scene {
     this.scene.launch('BuilderOverlay', overlayData);
 
     // 7. Camera: zoom steps, centred bounds, follow the local player.
-    this.cameraController = new CameraController(this, canvasSize.width, canvasSize.height);
+    // Left-drag pans in play mode; in edit mode the left button places furniture, so only middle-drag pans.
+    this.cameraController = new CameraController(
+      this,
+      canvasSize.width,
+      canvasSize.height,
+      () => !useBuilderStore.getState().isEditMode,
+    );
     const localPlayer = this.playerManager.localPlayer;
     if (localPlayer) {
       this.moveOutOfSolid(localPlayer);
@@ -153,7 +172,7 @@ export class OfficeScene extends Phaser.Scene {
 
     // 8. Debug overlay (F3). Visible by default in development.
     this.debugText = this.add
-      .text(16, 16, '', {
+      .text(DEBUG_PANEL_X, DEBUG_PANEL_Y, '', {
         fontSize: '13px',
         fontFamily: 'monospace',
         color: '#10b981',
@@ -166,6 +185,8 @@ export class OfficeScene extends Phaser.Scene {
     if (this.input.keyboard) {
       this.debugKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F3, false);
       this.debugKey.on('down', () => this.debugText.setVisible(!this.debugText.visible));
+      // E: sit on the nearest free seat, or stand up. Not captured, and ignored while typing.
+      this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E, false).on('down', () => this.handleSitKey());
     }
 
     // 9. Pointer: desk hover/click in play mode, builder input in edit mode.
@@ -176,14 +197,25 @@ export class OfficeScene extends Phaser.Scene {
           this.furnitureManager.handleHover(pointer.worldX, pointer.worldY);
         }
       } else {
+        const overSeat = this.furnitureManager.findSeatAt(pointer.worldX, pointer.worldY) !== null;
+        this.input.setDefaultCursor(overSeat ? 'pointer' : 'default');
         this.handleDeskHover(pointer.worldX, pointer.worldY);
       }
     });
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (pointer.button !== 0) return; // left-click only
-      if (useBuilderStore.getState().isEditMode) {
-        this.handleBuilderClick(pointer.worldX, pointer.worldY);
+      if (useBuilderStore.getState().isEditMode) this.handleBuilderClick(pointer.worldX, pointer.worldY);
+    });
+
+    // Play-mode clicks act on release, and only if the press did not turn into a camera drag.
+    this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+      if (pointer.button !== 0 || useBuilderStore.getState().isEditMode) return;
+      if (pointer.getDistance() >= DRAG_THRESHOLD) return;
+      // A click on a chair walks there and sits; anywhere else on a desk opens the desk panel.
+      const seatId = this.furnitureManager.findSeatAt(pointer.worldX, pointer.worldY);
+      if (seatId) {
+        this.requestSeat(seatId);
       } else {
         this.handleDeskClick(pointer.worldX, pointer.worldY);
       }
@@ -202,6 +234,11 @@ export class OfficeScene extends Phaser.Scene {
           }
           this.deskHoverGraphics.clear();
         },
+      ),
+      // "Go to my desk" (or any navigation target) next to a free seat ends sitting on it.
+      useGameStore.subscribe(
+        (s) => s.navigationTarget,
+        (target) => this.adoptSeatNearTarget(target),
       ),
       useBuilderStore.subscribe(
         (s) => s.selectedInstanceId,
@@ -268,23 +305,142 @@ export class OfficeScene extends Phaser.Scene {
     let intent = this.inputManager.getVelocity();
     const hasInput = intent.vx !== 0 || intent.vy !== 0;
 
+    if (this.localSeatId) {
+      const seat = this.furnitureManager.getSeat(this.localSeatId);
+      if (seat && !hasInput) {
+        this.networkManager.emitMove(seat.gx, seat.gy, this.localSeatId);
+        return;
+      }
+      // Walking gets you up, and so does the seat being moved away or removed.
+      this.standUp(localPlayer);
+    }
+
     const store = useGameStore.getState();
     if (hasInput) {
-      // Taking the keys cancels "go to my desk".
+      // Taking the keys cancels "go to my desk" and walking to a seat.
       if (store.navigationTarget) store.setNavigationTarget(null);
       this.navigation = null;
+      this.pendingSeatId = null;
     } else if (store.navigationTarget) {
       intent = this.navigationVelocity(localPlayer, store.navigationTarget, dt);
     }
 
     const moved = intent.vx !== 0 || intent.vy !== 0 ? this.moveLocal(localPlayer, intent.vx, intent.vy, dt) : 0;
+    // Walking brings the camera back to the avatar after a pan.
+    if (moved > 0) this.cameraController.resumeFollow();
     localPlayer.setMotion(intent.vx, intent.vy, dt > 0 ? moved / dt : 0);
 
     const gridPos = screenToGrid(localPlayer.x, localPlayer.y, this.isoLayout);
     if (moved > 0 && store.localPlayerId) {
       store.updatePlayerPosition(store.localPlayerId, gridPos.gx, gridPos.gy);
     }
-    this.networkManager.emitMove(gridPos.gx, gridPos.gy);
+    if (this.pendingSeatId && this.sitIfArrived(localPlayer, gridPos)) return;
+    this.networkManager.emitMove(gridPos.gx, gridPos.gy, null);
+  }
+
+  // ─── Sitting ───
+
+  /** Walks to a seat and sits on it (at once if already there). Ignored if someone else sits on it. */
+  private requestSeat(seatId: string): void {
+    const localPlayer = this.playerManager.localPlayer;
+    if (!localPlayer || seatId === this.localSeatId || this.isSeatTaken(seatId)) return;
+    const seat = this.furnitureManager.getSeat(seatId);
+    if (!seat) return;
+
+    if (this.localSeatId) this.standUp(localPlayer);
+    const here = screenToGrid(localPlayer.x, localPlayer.y, this.isoLayout);
+    this.pendingSeatId = seatId;
+    if (this.sitIfArrived(localPlayer, here)) return;
+    this.navigation = null;
+    useGameStore.getState().setNavigationTarget({ x: seat.gx, y: seat.gy });
+  }
+
+  /** Sits on the pending seat once the avatar reaches it. Drops it if the walk was given up. */
+  private sitIfArrived(localPlayer: PlayerSprite, here: GridPoint): boolean {
+    const seatId = this.pendingSeatId;
+    const seat = seatId ? this.furnitureManager.getSeat(seatId) : null;
+    if (!seatId || !seat || this.isSeatTaken(seatId)) {
+      this.pendingSeatId = null;
+      return false;
+    }
+
+    if (Math.hypot(seat.gx - here.gx, seat.gy - here.gy) > SIT_REACH) {
+      if (!useGameStore.getState().navigationTarget) this.pendingSeatId = null; // stuck or cancelled
+      return false;
+    }
+
+    const store = useGameStore.getState();
+    this.pendingSeatId = null;
+    this.navigation = null;
+    if (store.navigationTarget) store.setNavigationTarget(null);
+    this.localSeatId = seatId;
+    localPlayer.sitAt(seat.x, seat.y, seat.facing);
+    if (store.localPlayerId) store.updatePlayerPosition(store.localPlayerId, seat.gx, seat.gy, seatId);
+    this.networkManager.emitMove(seat.gx, seat.gy, seatId);
+    return true;
+  }
+
+  /** Stands up onto the seat's cell. */
+  private standUp(localPlayer: PlayerSprite): void {
+    const seat = this.localSeatId ? this.furnitureManager.getSeat(this.localSeatId) : null;
+    this.localSeatId = null;
+    localPlayer.standUp();
+
+    const g = seat ? { gx: seat.gx, gy: seat.gy } : screenToGrid(localPlayer.x, localPlayer.y, this.isoLayout);
+    const p = gridToScreen(g.gx, g.gy, this.isoLayout);
+    localPlayer.setPosition(p.sx, p.sy);
+    const store = useGameStore.getState();
+    if (store.localPlayerId) store.updatePlayerPosition(store.localPlayerId, g.gx, g.gy, null);
+  }
+
+  private handleSitKey(): void {
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
+    if (active instanceof HTMLElement && active.isContentEditable) return;
+    if (useBuilderStore.getState().isEditMode) return;
+
+    const localPlayer = this.playerManager.localPlayer;
+    if (!localPlayer) return;
+    if (this.localSeatId) {
+      this.standUp(localPlayer);
+      return;
+    }
+    const here = screenToGrid(localPlayer.x, localPlayer.y, this.isoLayout);
+    const seatId = this.furnitureManager.findNearestSeat(here.gx, here.gy, SIT_KEY_RANGE, this.seatsTakenByOthers());
+    if (seatId) this.requestSeat(seatId);
+  }
+
+  /** A new navigation target beside a free seat (go to my desk) becomes "walk there and sit". */
+  private adoptSeatNearTarget(target: { x: number; y: number } | null): void {
+    if (!target) return;
+    if (this.pendingSeatId) {
+      const pending = this.furnitureManager.getSeat(this.pendingSeatId);
+      if (pending && pending.gx === target.x && pending.gy === target.y) return; // our own walk to a seat
+    }
+    const seatId = this.furnitureManager.findNearestSeat(
+      target.x,
+      target.y,
+      SEAT_NEAR_TARGET,
+      this.seatsTakenByOthers(),
+    );
+    const seat = seatId ? this.furnitureManager.getSeat(seatId) : null;
+    if (!seatId || !seat) return;
+    this.pendingSeatId = seatId;
+    this.navigation = null;
+    useGameStore.getState().setNavigationTarget({ x: seat.gx, y: seat.gy });
+  }
+
+  private seatsTakenByOthers(): Set<string> {
+    const { players, localPlayerId } = useGameStore.getState();
+    const taken = new Set<string>();
+    for (const player of Object.values(players)) {
+      if (player.userId !== localPlayerId && player.seatId) taken.add(player.seatId);
+    }
+    return taken;
+  }
+
+  private isSeatTaken(seatId: string): boolean {
+    return this.seatsTakenByOthers().has(seatId);
   }
 
   /** Moves the local player by a screen velocity, resolved against walls and furniture. Returns px moved. */
@@ -498,11 +654,15 @@ export class OfficeScene extends Phaser.Scene {
   private updateDebugText(localPlayer: PlayerSprite) {
     if (!this.debugText.visible) return;
 
-    // Scroll factor 0 ignores scrolling but not zoom: counter-scale so the panel stays at the top-left.
+    // Scroll factor 0 ignores scrolling but not zoom: counter-scale so the panel stays at the top-left,
+    // below the HUD's zone badge.
     const cam = this.cameras.main;
     const zoom = cam.zoom;
     this.debugText.setScale(1 / zoom);
-    this.debugText.setPosition(cam.width / 2 + (16 - cam.width / 2) / zoom, cam.height / 2 + (16 - cam.height / 2) / zoom);
+    this.debugText.setPosition(
+      cam.width / 2 + (DEBUG_PANEL_X - cam.width / 2) / zoom,
+      cam.height / 2 + (DEBUG_PANEL_Y - cam.height / 2) / zoom,
+    );
 
     const state = useGameStore.getState();
     const builderState = useBuilderStore.getState();
@@ -514,6 +674,8 @@ export class OfficeScene extends Phaser.Scene {
       `Map       : ${state.officeData?.mapKey ?? '(none)'}`,
       `Zoom      : ${zoom}×  (wheel, + / −)`,
       `Grid      : X:${gridPos.gx.toFixed(2)} Y:${gridPos.gy.toFixed(2)}`,
+      `Furniture : ${builderState.placedItems.length} items`,
+      `Seat      : ${this.localSeatId ? 'sitting (E or move to stand)' : 'click a chair or press E'}`,
     ];
     if (builderState.isEditMode) {
       lines.push(`Builder   : EDIT · ${builderState.placedItems.length} items · dirty ${builderState.isDirty}`);

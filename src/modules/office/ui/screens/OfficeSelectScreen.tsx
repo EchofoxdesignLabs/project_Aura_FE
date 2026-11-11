@@ -10,6 +10,7 @@ import type { Office, OfficeStatePayload } from '@core/types';
 
 import { OfficeCard } from '../components/OfficeCard';
 import { InviteModal } from '../components/InviteModal';
+import { useBuilderStore } from '../../../builder/state/builder.store';
 
 export function OfficeSelectScreen() {
   const user = useAuthStore((state) => state.user);
@@ -112,6 +113,11 @@ export function OfficeSelectScreen() {
           setLocalPlayerId(user.id);
           setOffice(state.office, state.zones);
           setAllPlayers(state.players);
+          // The game reads furniture from the builder store. GameContainer only re-requests
+          // office:state after a reconnect, so this join is the one that delivers the layout.
+          useBuilderStore
+            .getState()
+            .loadLayout(state.furniture ?? [], state.office.gridWidth, state.office.gridHeight);
           resolve();
         };
 
@@ -148,8 +154,8 @@ export function OfficeSelectScreen() {
                 Welcome back, {user?.name?.split(' ')[0] ?? 'Explorer'}.
               </h1>
               <p className="max-w-2xl text-lg leading-8 text-slate-300">
-                Choose the office you want to enter. If your organization is brand-new, create the
-                default layout here and move straight into the realtime flow.
+                Choose the office you want to enter. Every organization starts in the HQ Office, built
+                from the default Aura map.
               </p>
             </div>
           </div>
