@@ -16,6 +16,8 @@ export function OfficeSelectScreen() {
   const user = useAuthStore((state) => state.user);
   const token = useAuthStore((state) => state.token);
   const logout = useAuthStore((state) => state.logout);
+  // POST /office/seed and /office/reseed are ORG_ADMIN only on the backend.
+  const isAdmin = user?.role === 'ORG_ADMIN';
 
   const setOffice = useGameStore((state) => state.setOffice);
   const setAllPlayers = useGameStore((state) => state.setAllPlayers);
@@ -177,7 +179,7 @@ export function OfficeSelectScreen() {
             </div>
 
             <div className="flex flex-wrap gap-3">
-              {offices.length === 0 ? (
+              {offices.length === 0 && isAdmin ? (
                 <Button
                   onClick={handleSeedOffice}
                   variant="secondary"
@@ -191,7 +193,7 @@ export function OfficeSelectScreen() {
                   Refresh Offices
                 </Button>
               )}
-              {user?.role === 'ORG_ADMIN' ? (
+              {isAdmin ? (
                 <>
                   <Button variant="outline" onClick={() => setInviteOpen(true)}>
                     + Invite Member
@@ -273,15 +275,22 @@ export function OfficeSelectScreen() {
                     No offices yet for {user?.company ?? 'your organization'}.
                   </h2>
                   <p className="max-w-2xl text-base leading-7 text-slate-300">
-                    That usually means this is a brand-new company workspace. Create the default
-                    office layout to unlock the next step of the realtime onboarding flow.
+                    {isAdmin
+                      ? 'That usually means this is a brand-new company workspace. Create the default office layout to unlock the next step of the realtime onboarding flow.'
+                      : 'Ask your organization admin to create the office, then refresh this page.'}
                   </p>
                 </div>
 
                 <div className="flex flex-wrap gap-3">
-                  <Button onClick={handleSeedOffice} isLoading={isSeeding} disabled={isSeeding}>
-                    {isSeeding ? 'Creating Default Office' : 'Create Default Office'}
-                  </Button>
+                  {isAdmin ? (
+                    <Button onClick={handleSeedOffice} isLoading={isSeeding} disabled={isSeeding}>
+                      {isSeeding ? 'Creating Default Office' : 'Create Default Office'}
+                    </Button>
+                  ) : (
+                    <Button onClick={() => void fetchOffices()} disabled={isLoading}>
+                      Refresh Offices
+                    </Button>
+                  )}
                   <Button onClick={logout} variant="outline">
                     Sign Out
                   </Button>

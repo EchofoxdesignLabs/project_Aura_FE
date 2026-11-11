@@ -21,10 +21,10 @@ Electron 39, and lucide-react icons.
 
 ```bash
 npm install
-npm run dev            # Vite on http://localhost:51173 (strictPort)
+npm run dev            # Vite on http://localhost:5173 (strictPort)
 npm run lint           # ESLint (must pass)
 npm run build          # tsc -b && vite build (must pass)
-npm run electron:dev   # Electron + Vite (see electron/AGENTS.md: port mismatch)
+npm run electron:dev   # Electron + Vite (see electron/AGENTS.md)
 npm run assets:sync    # copy exported art from ../Aura_Assets (or $AURA_ASSETS_DIR) into public/assets
 ```
 
@@ -105,6 +105,7 @@ Build output (`dist`, `dist-electron`, `*.tsbuildinfo`) is git-ignored. Do not c
 
 - No automated tests.
 - The JWT is stored in `localStorage` with a 1-day expiry, and there is no refresh or expiry check on hydrate. An expired token fails only at the socket handshake.
-- The invite route depends on `window.location.pathname`, which does not work in the packaged Electron app (`file://`).
+- Vite `base` is `/` so deep links (`/invite/:token`) load their assets. The host must serve `index.html` for unknown
+  paths (Cloudflare Pages does by default). Packaged Electron loads the hosted URL, so it shares this routing.
 - Lots of `console.log` in the hot paths (socket requests, SFU, office state).
 - The main bundle is over 500 kB (Phaser). Lazy-load `GameContainer`.

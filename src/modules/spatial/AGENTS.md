@@ -43,8 +43,8 @@ over the canvas.
 - Depth: world objects use `depthForKey(key)`, where key = gx + gy of their front-most ground point (`footprintSortKey` for
   footprints). Anything that should hide or be hidden by avatars must register with `DepthSorter`. Labels use `DEPTH.ZONE_LABEL`
   or `DEPTH.NAME_TAG` and are counter-scaled by 1 / zoom.
-- Art comes from the asset pipeline (`npm run assets:sync`, see the root guide). Load files with `assetUrl()` and never with
-  absolute `/assets/...` paths, which break under Electron's `file://`.
+- Art comes from the asset pipeline (`npm run assets:sync`, see the root guide). Load files with `assetUrl()`, which prefixes Vite's `BASE_URL`,
+  rather than hand-building `/assets/...` paths.
 - Keys added with `addKey(code, false)` do not capture, so they still type into React inputs. Use that for anything but movement.
 - Register a listener in `NetworkManager.init()` and remove it in `destroy()`. Leaked listeners duplicate events after a reconnect.
 - The server detects zones. The client does not compute zone entry, apart from desk hover UI.
